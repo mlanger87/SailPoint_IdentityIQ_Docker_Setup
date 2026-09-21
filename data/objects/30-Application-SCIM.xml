@@ -1,0 +1,213 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  SCIM-Applikation - drittes Zielsystem
+  ===========================================================================
+  Spricht den Container "scim" an (harrykodden/scim, RFC 7643/7644).
+
+  Der Connector kommt aus connector-bundle-webservices.jar und wird
+  ueber den OpenConnectorAdapter geladen. Eine Besonderheit dabei:
+
+      Class.forName("openconnector.connector.scim2.SCIM2Connector")
+
+  schlaegt mit ClassNotFoundException fehl, obwohl die Klasse im Bundle
+  liegt. Der Adapter benutzt einen eigenen Klassenlader; ein Test ueber
+  den normalen Klassenpfad geht daran vorbei und beweist nichts. Die
+  einzige belastbare Pruefung ist ein echter Verbindungstest.
+
+  Die Struktur folgt einem Export aus einer 8.5-Instanz. Abweichungen:
+
+    - host zeigt auf den Container im Docker-Netz (http://scim:8000)
+      statt auf einen Platzhalter.
+    - Zugangsdaten im Klartext statt verschluesselt (1:ACP:...). Der
+      verschluesselte Wert waere an den Keystore der Ursprungsinstanz
+      gebunden und hier wertlos - siehe CLAUDE.md.
+    - Das Account-Schema ist ausgefuellt. Der Export trug ein leeres
+      Schema (nur nativeObjectType="User"), weil die Attribute dort
+      ueber DISCOVER_SCHEMA vom Server geholt werden sollten.
+
+  Der Server nutzt Bearer-Token-Authentifizierung: authType="oauthBearer".
+  Das "basic" aus dem Export passt dazu nicht.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <Application connector="sailpoint.connector.OpenConnectorAdapter"
+               featuresString="DISCOVER_SCHEMA, PROVISIONING, SYNC_PROVISIONING, ENABLE, SEARCH, ACCOUNT_ONLY_REQUEST"
+               icon="internetIcon"
+               name="SCIM-Target"
+               profileClass=""
+               type="SCIM 2.0">
+
+    <AccountCorrelationConfig>
+      <Reference class="sailpoint.object.CorrelationConfig"
+                 name="SCIM Correlation"/>
+    </AccountCorrelationConfig>
+
+    <Attributes>
+      <Map>
+        <entry key="connectorClass"
+               value="openconnector.connector.scim2.SCIM2Connector"/>
+        <entry key="host" value="http://scim:8000"/>
+
+        <!--
+          Der Server erwartet "Authorization: Bearer <token>".
+
+          Der richtige Wert ist "oauthBearer" - ein statischer Token.
+          Nicht "oauth2": das entspricht der Konstante OAuth2Login und
+          erwartet einen vollstaendigen Token-Fluss mit token_url,
+          Benutzer und Passwort. Mit dem falschen Wert antwortet der
+          Server mit 401 invalidCredentials.
+
+          Die gueltigen Werte stehen in den Konstanten des Bundles:
+            javap -p -constants openconnector/connector/scim2/SCIM2Constants.class
+              AUTH_TYPE_BASIC              = "Basic"
+              AUTH_TYPE_BEARER             = "oauthBearer"
+              AUTH_TYPE_OAUTH2             = "OAuth2Login"
+              AUTH_TYPE_NO_AUTHENTICATION  = "No Auth"
+        -->
+        <entry key="authType" value="oauthBearer"/>
+        <entry key="oauthBearerToken" value="secret"/>
+
+        <entry key="contentType" value="application/scim+json"/>
+        <entry key="accept" value="application/scim+json"/>
+
+        <entry key="load-by-sysclassloader">
+          <value>
+            <List>
+              <String>json.jar</String>
+            </List>
+          </value>
+        </entry>
+
+        <!--
+          Fordert genau die Attribute des Schemas an (?attributes=...).
+          Ohne diesen Schalter holt der Connector einen Standardsatz, in
+          dem externalId FEHLT - die Korrelation greift dann nicht, und
+          IIQ legt fuer jedes Konto eine eigene Identitaet an, statt es
+          der vorhandenen zuzuordnen.
+        -->
+        <entry key="explicitAttributesRequest">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="relaxConfiguration">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="skipGrpUpdate" value="true"/>
+
+        <entry key="encrypted"
+               value="client_secret,oauthBearerToken,oauthTokenInfo,refresh_token,private_key,private_key_password,additional_payload,oauth2password"/>
+
+        <entry key="templateApplication" value="SCIM 2.0"/>
+        <entry key="sysDescriptions">
+          <value>
+            <Map>
+              <entry key="en_US" value="SCIM 2.0 target system"/>
+            </Map>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+
+    <Schemas>
+      <!--
+        externalId traegt die Personalnummer und ist damit der
+        Korrelationsschluessel - id ist eine vom Server vergebene UUID
+        und taugt dafuer nicht, weil sie beim Anlegen noch unbekannt ist.
+
+        identityAttribute bleibt trotzdem id: das ist die native
+        Kennung, ueber die der Connector einen Eintrag adressiert.
+      -->
+      <Schema displayAttribute="userName"
+              identityAttribute="id"
+              instanceAttribute=""
+              nativeObjectType="User"
+              objectType="account">
+        <AttributeDefinition name="id" type="string">
+          <Description>Vom Server vergebene Kennung (UUID)</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="externalId" type="string">
+          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="userName" type="string">
+          <Description>Anmeldename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="displayName" type="string">
+          <Description>Anzeigename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="name.givenName" type="string">
+          <Description>Vorname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="name.familyName" type="string">
+          <Description>Nachname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="emails.value" type="string">
+          <Description>Mailadresse</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="title" type="string">
+          <Description>Funktionsbezeichnung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="active" type="boolean">
+          <Description>Aktiv oder deaktiviert</Description>
+        </AttributeDefinition>
+        <AttributeDefinition entitlement="true" managed="true" multi="true"
+                             name="groups.value" schemaObjectType="group"
+                             type="string">
+          <Description>Gruppenmitgliedschaften</Description>
+        </AttributeDefinition>
+      </Schema>
+
+      <Schema displayAttribute="displayName"
+              identityAttribute="id"
+              instanceAttribute=""
+              nativeObjectType="Group"
+              objectType="group">
+        <AttributeDefinition name="id" type="string">
+          <Description>Kennung der Gruppe</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="displayName" type="string">
+          <Description>Name der Gruppe</Description>
+        </AttributeDefinition>
+      </Schema>
+    </Schemas>
+
+  </Application>
+
+  <CorrelationConfig name="SCIM Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="externalId"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
+
+  <TaskDefinition name="SCIM Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  template="true"
+                  type="AccountAggregation">
+    <Description>Liest die Konten des SCIM-Zielsystems und korreliert sie ueber externalId.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="SCIM-Target"/>
+        <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+</sailpoint>

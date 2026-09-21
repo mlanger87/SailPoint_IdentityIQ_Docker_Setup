@@ -119,39 +119,35 @@
   <!-- ===================================================================
        Leaver: inactive wechselt von false auf true
        =================================================================== -->
+  <!--
+    type="Rule" statt "AttributeChange": Die Regel prueft den Wechsel
+    selbst UND grenzt gegen den Joiner-Fall ab. Ob IIQ bei
+    type="AttributeChange" eine zusaetzliche TriggerRule ueberhaupt
+    auswertet, ist nicht belegt - keiner der mitgelieferten Trigger
+    kombiniert beides. Mit type="Rule" ist die Auswertung eindeutig.
+  -->
   <IdentityTrigger name="HR Leaver"
-                   attributeName="inactive"
-                   oldValueFilter="false"
-                   newValueFilter="true"
-                   type="AttributeChange"
+                   type="Rule"
                    handler="sailpoint.api.WorkflowTriggerHandler"
                    disabled="false">
     <Description>
       Startet den Leaver-Workflow, sobald das Austrittsdatum erreicht ist.
     </Description>
     <!--
-      Abgrenzung zum Joiner: Beide Gruppen wechseln inactive von false
-      auf true - eine Identitaet mit kuenftigem Eintrittsdatum wird
-      zunaechst aktiv angelegt und dann gesperrt. Ohne diesen Selector
-      liefe der Leaver-Workflow auch fuer jeden kuenftigen Eintritt an
-      (gemessen: 10 Laeufe bei 4 echten Leavern).
+      Abgrenzung zum Joiner ueber eine TriggerRule.
 
-      Das Austrittsdatum unterscheidet die beiden Faelle eindeutig.
+      Beide Gruppen wechseln inactive von false auf true - eine
+      Identitaet mit kuenftigem Eintrittsdatum wird zunaechst aktiv
+      angelegt und dann gesperrt.
+
+      Ein Selector mit MatchTerm genuegte hier NICHT: bei kuenftigen
+      Eintritten ist endDate null, nicht leer, und negative="true" mit
+      value="" trifft auch auf null zu. Gemessen: 10 Leaver-Laeufe bei
+      4 echten Leavern.
     -->
-    <Selector>
-      <IdentitySelector>
-        <MatchExpression>
-          <!--
-            negative="true" mit leerem value bedeutet: endDate ist
-            NICHT leer. Gueltige type-Werte laut DTD: Entitlement,
-            Permission, TargetPermission, IdentityAttribute,
-            RoleAttribute, EntitlementAttribute.
-          -->
-          <MatchTerm name="endDate" type="IdentityAttribute"
-                     negative="true" value=""/>
-        </MatchExpression>
-      </IdentitySelector>
-    </Selector>
+    <TriggerRule>
+      <Reference class="sailpoint.object.Rule" name="HR Leaver Trigger"/>
+    </TriggerRule>
     <HandlerParameters>
       <Attributes>
         <Map>

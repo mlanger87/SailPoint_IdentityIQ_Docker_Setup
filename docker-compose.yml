@@ -213,6 +213,68 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
+  # Mock-REST-API - viertes Zielsystem, fuer den Web-Services-Connector
+  #
+  # Bildet eine gewoehnliche Personalverwaltungs-API nach: verschachtelte
+  # Antworten (data[]/meta{}), offset-Paging, Bearer-Token, eigenes
+  # Fehlerformat. Bewusst NICHT SCIM - dafuer gibt es den Dienst "scim".
+  #
+  # Genau an diesen Eigenheiten haengt die Anbindung in echten Projekten:
+  # rootPath muss auf data zeigen, das Paging auf offset/limit abgebildet
+  # werden. Eine flache Liste wuerde das nicht pruefen.
+  #
+  # Die Bestandskonten stammen aus derselben HR-CSV wie die anderen
+  # Zielsysteme, die employeeId ist also ueberall derselbe
+  # Korrelationsschluessel.
+  # -------------------------------------------------------------------------
+  mockapi:
+    build:
+      context: .
+      dockerfile: docker/mockapi/Dockerfile
+    image: iiq-mockapi:${IIQ_VERSION:-8.5}
+    container_name: iiq-mockapi
+    environment:
+      API_TOKEN: ${MOCKAPI_TOKEN:-mocktoken}
+      SEED_COUNT: "4"
+    ports:
+      - "${MOCKAPI_PORT:-8200}:8000"
+    volumes:
+      - ./data/hr:/data/hr:ro
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
+  # SCIM-Server - drittes Zielsystem
+  #
+  # Zur Werkzeugwahl:
+  #   - harrykodden/scim: Python-Implementierung nach RFC 7643/7644,
+  #     amd64 steht im Manifest an erster Stelle. Getestet: liefert
+  #     ServiceProviderConfig, unterstuetzt patch und filter, und nimmt
+  #     angelegte User mit id/meta/etag entgegen - taugt also als echtes
+  #     Zielsystem, nicht nur zum Lesen.
+  #   - i2scim (Quarkus) und Apache SCIMple waeren Alternativen; ersteres
+  #     ist schwergewichtiger, letzteres war nicht erreichbar.
+  #
+  # Die Daten liegen im Container (Flat-File-Backend). Fuer eine
+  # Dev-Umgebung genuegt das; ein Neustart des Containers setzt sie
+  # zurueck, was beim Testen eher nuetzlich als hinderlich ist.
+  #
+  # Anmeldung ueber Bearer-Token (API_KEY), passend zum authType des
+  # SCIM-2.0-Connectors.
+  # -------------------------------------------------------------------------
+  scim:
+    image: harrykodden/scim:latest
+    platform: linux/amd64
+    container_name: iiq-scim
+    environment:
+      API_KEY: ${SCIM_API_KEY:-secret}
+      LOGLEVEL: INFO
+    ports:
+      - "${SCIM_PORT:-8100}:8000"
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
   # LDAP-UI - Browser fuer das Testverzeichnis
   #
   # Zur Werkzeugwahl:

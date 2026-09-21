@@ -1,0 +1,665 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Web-Services-Applikation - viertes Zielsystem
+  ===========================================================================
+  Spricht die Mock-REST-API im Container "mockapi" an. Anders als der
+  SCIM-Connector, der ein festes Protokoll voraussetzt, wird hier JEDER
+  Endpunkt einzeln beschrieben - das ist der uebliche Fall bei
+  hauseigenen Schnittstellen.
+
+  Die gueltigen Werte stammen aus der mitgelieferten Formulardefinition
+  WEB-INF/config/connector/WebServices.xml, nicht aus Beispielen:
+
+    authenticationMethod
+        BasicLogin    Benutzer und Passwort
+        OAuthLogin    API-Token (hier verwendet)
+        OAuth2Login   vollstaendiger OAuth-2-Fluss
+        No Auth       keine oder eigene Authentifizierung
+
+    operationType
+        Test Connection, Account Aggregation,
+        Account Delta Aggregation, Group Aggregation,
+        Get Object, Get Object-Group,
+        Create Account, Update Account, Delete Account,
+        Enable Account, Disable Account
+
+  Aufbau: genericWebServiceBaseUrl gibt die Basis vor, jeder Eintrag in
+  connectionParameters beschreibt einen Endpunkt relativ dazu.
+
+  Die drei Stellen, an denen solche Anbindungen typischerweise scheitern:
+
+    1. rootPath - die API liefert die Datensaetze unter "data", nicht auf
+       oberster Ebene. Der Eintrag gehoert auf ENDPUNKT-Ebene (in der
+       Oberflaeche: Menue "Response Information"), NICHT in die
+       resMappingObj-Map. Falsch verschachtelt meldet die Aggregation
+       Success und verarbeitet null Datensaetze.
+
+    2. Paging - diese API nutzt offset/limit, andere page/size oder einen
+       Cursor. Fehlt die Konfiguration, liest der Connector nur die erste
+       Seite und meldet trotzdem Erfolg.
+
+    3. $plan.* / $response.* - die Platzhalter, ueber die Werte in den
+       Rumpf gelangen. Ein Tippfehler darin bleibt unbemerkt, das Feld
+       wird einfach leer uebertragen.
+
+    4. Der Name des Rumpf-Feldes haengt am bodyFormat:
+           bodyFormat="raw"   ->  rawBody
+           bodyFormat="json"  ->  jsonBody
+       Der falsche Name laesst die Initialisierung der Facade mit
+       einer NullPointerException abbrechen - die Konsole meldet nur
+       "null", ohne Hinweis auf die Ursache.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <Application connector="sailpoint.connector.webservices.WebServicesConnector"
+               featuresString="PROVISIONING, ENABLE, SEARCH, ACCOUNT_ONLY_REQUEST"
+               icon="internetIcon"
+               name="WebService-Target"
+               profileClass=""
+               type="Web Services">
+
+    <AccountCorrelationConfig>
+      <Reference class="sailpoint.object.CorrelationConfig"
+                 name="WebService Correlation"/>
+    </AccountCorrelationConfig>
+
+    <Attributes>
+      <Map>
+        <entry key="genericWebServiceBaseUrl" value="http://mockapi:8000"/>
+
+        <!--
+          OAuthLogin bedeutet hier: statischer API-Token im
+          Authorization-Header. Nicht zu verwechseln mit OAuth2Login,
+          das einen Token-Fluss mit token_url erwartet.
+        -->
+        <entry key="authenticationMethod" value="OAuthLogin"/>
+        <entry key="accesstoken" value="mocktoken"/>
+
+        <entry key="timeoutInSeconds" value="30"/>
+        <entry key="disableCookies">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+
+        <!--
+          =================================================================
+          Die Endpunkte
+          =================================================================
+        -->
+        <entry key="connectionParameters">
+          <value>
+            <List>
+
+              <!-- ===================================================
+                   Verbindungstest
+                   ===================================================
+                   Nutzt /health, das bewusst ohne Token auskommt: So
+                   laesst sich unterscheiden, ob der Dienst nicht
+                   erreichbar ist oder die Anmeldung scheitert.
+              -->
+              <Map>
+                <entry key="operationType" value="Test Connection"/>
+                <entry key="uniqueNameForEndPoint" value="TestConnection"/>
+                <entry key="contextUrl" value="/api/v1/health"/>
+                <entry key="httpMethodType" value="GET"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Kontenaggregation mit Paging
+                   ===================================================
+                   rootPath zeigt auf "data" - dort liegen die
+                   Datensaetze. Das Paging laeuft ueber offset/limit;
+                   der Connector zaehlt offset selbst hoch, solange
+                   Datensaetze zurueckkommen.
+              -->
+              <Map>
+                <entry key="operationType" value="Account Aggregation"/>
+                <entry key="uniqueNameForEndPoint" value="AccountAggregation"/>
+                <entry key="contextUrl" value="/api/v1/users"/>
+                <entry key="httpMethodType" value="GET"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+                <entry key="rootPath" value="data"/>
+                <entry key="resMappingObj">
+                  <value>
+                    <Map>
+                      <entry key="nativeIdentity" value="id"/>
+                      <entry key="employeeId" value="employeeId"/>
+                      <entry key="login" value="login"/>
+                      <entry key="firstName" value="firstName"/>
+                      <entry key="lastName" value="lastName"/>
+                      <entry key="fullName" value="fullName"/>
+                      <entry key="email" value="email"/>
+                      <entry key="jobTitle" value="jobTitle"/>
+                      <entry key="department" value="department"/>
+                      <entry key="office" value="office"/>
+                      <entry key="status" value="status"/>
+                      <entry key="roles" value="roles"/>
+                    </Map>
+                  </value>
+                </entry>
+                <!--
+                  KEIN Paging konfiguriert - bewusst.
+
+                  paginationSteps ist laut Formulardefinition ein
+                  Textarea, also ein URL-Fragment mit Platzhaltern, kein
+                  Schluesselwort. Ein blosses "offset" wird nicht als
+                  Paging erkannt: Der Connector ruft dann denselben
+                  Endpunkt ohne Parameter immer wieder auf und haelt nie
+                  an. Gemessen: 11.943 Aufrufe, bis die Aufgabe von Hand
+                  beendet wurde.
+
+                  Fuer die Datenmenge dieser Umgebung ist Paging ohnehin
+                  unnoetig - die API liefert bis zu 200 Datensaetze am
+                  Stueck. Wer es braucht, konfiguriert es ueber die
+                  Oberflaeche (Application > Settings > Paging) und
+                  exportiert das erzeugte Fragment.
+                -->
+              </Map>
+
+              <!-- ===================================================
+                   Gruppenaggregation - die Entitlements
+                   =================================================== -->
+              <Map>
+                <entry key="operationType" value="Group Aggregation"/>
+                <entry key="uniqueNameForEndPoint" value="GroupAggregation"/>
+                <entry key="contextUrl" value="/api/v1/groups"/>
+                <entry key="httpMethodType" value="GET"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+                <entry key="rootPath" value="data"/>
+                <entry key="resMappingObj">
+                  <value>
+                    <Map>
+                      <entry key="nativeIdentity" value="name"/>
+                      <entry key="name" value="name"/>
+                      <entry key="description" value="description"/>
+                    </Map>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Einzelabruf nach dem Provisionieren
+                   ===================================================
+                   $plan.nativeIdentity$ setzt der Connector aus der
+                   Kennung des betroffenen Kontos ein.
+              -->
+              <Map>
+                <entry key="operationType" value="Get Object"/>
+                <entry key="uniqueNameForEndPoint" value="GetObject"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$"/>
+                <entry key="httpMethodType" value="GET"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+                <entry key="resMappingObj">
+                  <value>
+                    <Map>
+                      <entry key="nativeIdentity" value="id"/>
+                      <entry key="employeeId" value="employeeId"/>
+                      <entry key="login" value="login"/>
+                      <entry key="status" value="status"/>
+                      <entry key="roles" value="roles"/>
+                    </Map>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Konto anlegen
+                   ===================================================
+                   Die $plan.*$-Platzhalter werden aus dem
+                   ProvisioningPlan gefuellt. Die Namen muessen exakt
+                   den Attributen der Create-Policy entsprechen - ein
+                   Tippfehler faellt nicht auf, das Feld bleibt
+                   stillschweigend leer.
+              -->
+              <Map>
+                <entry key="operationType" value="Create Account"/>
+                <entry key="uniqueNameForEndPoint" value="CreateAccount"/>
+                <entry key="contextUrl" value="/api/v1/users"/>
+                <entry key="httpMethodType" value="POST"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Content-Type" value="application/json"/>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="body">
+                  <value>
+                    <Map>
+                      <entry key="bodyFormat" value="raw"/>
+                      <entry key="rawBody">
+                        <value>
+                          <String><![CDATA[{
+  "login": "$plan.login$",
+  "employeeId": "$plan.employeeId$",
+  "firstName": "$plan.firstName$",
+  "lastName": "$plan.lastName$",
+  "fullName": "$plan.fullName$",
+  "email": "$plan.email$",
+  "jobTitle": "$plan.jobTitle$",
+  "department": "$plan.department$",
+  "office": "$plan.office$",
+  "status": "ACTIVE"
+}]]></String>
+                        </value>
+                      </entry>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>201</Integer>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+                <entry key="resMappingObj">
+                  <value>
+                    <Map>
+                      <entry key="nativeIdentity" value="id"/>
+                    </Map>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Konto aendern
+                   =================================================== -->
+              <Map>
+                <entry key="operationType" value="Update Account"/>
+                <entry key="uniqueNameForEndPoint" value="UpdateAccount"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$"/>
+                <entry key="httpMethodType" value="PATCH"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Content-Type" value="application/json"/>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="body">
+                  <value>
+                    <Map>
+                      <entry key="bodyFormat" value="raw"/>
+                      <entry key="rawBody">
+                        <value>
+                          <String><![CDATA[{
+  "roles": $plan.roles$
+}]]></String>
+                        </value>
+                      </entry>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Konto deaktivieren statt loeschen
+                   ===================================================
+                   Wie beim JDBC-Zielsystem: Die Daten bleiben aus
+                   Nachweisgruenden erhalten, nur der Status wechselt.
+              -->
+              <Map>
+                <entry key="operationType" value="Disable Account"/>
+                <entry key="uniqueNameForEndPoint" value="DisableAccount"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$"/>
+                <entry key="httpMethodType" value="PATCH"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Content-Type" value="application/json"/>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="body">
+                  <value>
+                    <Map>
+                      <entry key="bodyFormat" value="raw"/>
+                      <entry key="rawBody">
+                        <value>
+                          <String><![CDATA[{"status": "DISABLED"}]]></String>
+                        </value>
+                      </entry>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+              <Map>
+                <entry key="operationType" value="Enable Account"/>
+                <entry key="uniqueNameForEndPoint" value="EnableAccount"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$"/>
+                <entry key="httpMethodType" value="PATCH"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Content-Type" value="application/json"/>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="body">
+                  <value>
+                    <Map>
+                      <entry key="bodyFormat" value="raw"/>
+                      <entry key="rawBody">
+                        <value>
+                          <String><![CDATA[{"status": "ACTIVE"}]]></String>
+                        </value>
+                      </entry>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Konto loeschen
+                   ===================================================
+                   Angelegt, aber im Leaver-Workflow nicht benutzt -
+                   dort wird deaktiviert. Vorhanden, damit sich der
+                   Fall bei Bedarf testen laesst.
+              -->
+              <Map>
+                <entry key="operationType" value="Delete Account"/>
+                <entry key="uniqueNameForEndPoint" value="DeleteAccount"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$"/>
+                <entry key="httpMethodType" value="DELETE"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>204</Integer>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+            </List>
+          </value>
+        </entry>
+
+        <entry key="sysDescriptions">
+          <value>
+            <Map>
+              <entry key="en_US" value="REST API target system (generic web services)"/>
+            </Map>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+
+    <ProvisioningForms>
+      <Form name="Create Account" objectType="account" type="Create">
+        <Attributes>
+          <Map>
+            <entry key="pageTitle" value="Create Account"/>
+          </Map>
+        </Attributes>
+        <Section name="Account">
+          <Field name="employeeId" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                return identity.getStringAttribute("employeeNumber");
+              ]]></Source>
+            </Script>
+          </Field>
+          <Field name="login" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                // Anmeldename aus der Mailadresse - dasselbe Muster wie
+                // bei den Bestandskonten, damit angelegte und
+                // vorhandene Konten gleich aussehen.
+                String mail = identity.getEmail();
+                if (mail != null && mail.indexOf("@") > 0) {
+                    return mail.substring(0, mail.indexOf("@"));
+                }
+                return identity.getName().toLowerCase();
+              ]]></Source>
+            </Script>
+          </Field>
+          <Field name="firstName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getFirstname();]]></Source>
+            </Script>
+          </Field>
+          <Field name="lastName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getLastname();]]></Source>
+            </Script>
+          </Field>
+          <Field name="fullName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getDisplayableName();]]></Source>
+            </Script>
+          </Field>
+          <Field name="email" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getEmail();]]></Source>
+            </Script>
+          </Field>
+          <Field name="jobTitle" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("jobTitle");]]></Source>
+            </Script>
+          </Field>
+          <Field name="department" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("department");]]></Source>
+            </Script>
+          </Field>
+          <Field name="office" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("location");]]></Source>
+            </Script>
+          </Field>
+        </Section>
+      </Form>
+    </ProvisioningForms>
+
+    <Schemas>
+      <!--
+        nativeIdentity ist die vom Server vergebene UUID (id), weil der
+        Connector Konten darueber adressiert. Korreliert wird dagegen
+        ueber employeeId - die UUID ist beim Anlegen noch unbekannt.
+      -->
+      <Schema displayAttribute="fullName"
+              identityAttribute="id"
+              instanceAttribute=""
+              nativeObjectType="account"
+              objectType="account">
+        <AttributeDefinition name="id" type="string">
+          <Description>Vom Zielsystem vergebene Kennung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="employeeId" type="string">
+          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="login" type="string">
+          <Description>Anmeldename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="firstName" type="string">
+          <Description>Vorname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="lastName" type="string">
+          <Description>Nachname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="fullName" type="string">
+          <Description>Anzeigename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="email" type="string">
+          <Description>Mailadresse</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="jobTitle" type="string">
+          <Description>Funktionsbezeichnung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="department" type="string">
+          <Description>Abteilung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="office" type="string">
+          <Description>Standort</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="status" type="string">
+          <Description>ACTIVE oder DISABLED</Description>
+        </AttributeDefinition>
+        <AttributeDefinition entitlement="true" managed="true" multi="true"
+                             name="roles" schemaObjectType="group" type="string">
+          <Description>Rollen im Zielsystem</Description>
+        </AttributeDefinition>
+      </Schema>
+
+      <Schema displayAttribute="name"
+              identityAttribute="name"
+              instanceAttribute=""
+              nativeObjectType="group"
+              objectType="group">
+        <AttributeDefinition name="name" type="string">
+          <Description>Name der Rolle</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="description" type="string">
+          <Description>Beschreibung</Description>
+        </AttributeDefinition>
+      </Schema>
+    </Schemas>
+
+  </Application>
+
+  <CorrelationConfig name="WebService Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="employeeId"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
+
+  <TaskDefinition name="WebService Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  template="true"
+                  type="AccountAggregation">
+    <Description>Liest die Konten der REST-API und korreliert sie ueber employeeId.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="WebService-Target"/>
+        <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+  <TaskDefinition name="WebService Group Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="String"
+                  resultAction="Delete"
+                  subType="task_item_type_acct_grp_aggregation"
+                  template="true"
+                  type="AccountGroupAggregation">
+    <Description>Laedt die Rollen der REST-API als Entitlements.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="WebService-Target"/>
+        <entry key="aggregationType" value="group"/>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+</sailpoint>

@@ -64,6 +64,8 @@ Spätere Starts dauern etwa eine Minute.
 | **Mailpit** (Mailfang) | http://localhost:8025 | — |
 | **DBGate** (Datenbank) | http://localhost:5050 | — (drei Verbindungen sind vorkonfiguriert) |
 | **LDAP-UI** (Verzeichnis) | http://localhost:5080 | `admin` / `adminpassword` |
+| SCIM-Server | http://localhost:8100 | Bearer-Token `secret` |
+| Mock-REST-API | http://localhost:8200 | Bearer-Token `mocktoken` |
 | PostgreSQL | `localhost:5432` | `identityiq` / `identityiq` |
 | OpenLDAP | `localhost:1389` | `cn=admin,dc=example,dc=com` / `adminpassword` |
 
@@ -120,6 +122,8 @@ Die Umgebung bildet eine kleine, aber vollständige Landschaft ab:
 | **HR-Application** | autoritative **Quelle** | 100 Personen aus `data/hr/HR-people.csv` |
 | **LDAP-Target** | **Zielsystem** | 5 Bestandskonten, 50 Gruppen als Entitlements |
 | **JDBC-Target** | **Zielsystem** | 3 Bestandskonten, 6 Rollen in `targetdb` |
+| **SCIM-Target** | **Zielsystem** | 3 Bestandskonten, SCIM 2.0 |
+| **WebService-Target** | **Zielsystem** | 4 Bestandskonten, 5 Rollen, REST |
 
 Die Quelle erzeugt die Identitäten; in den Zielsystemen legt IdentityIQ Konten an. Deshalb
 sind die Zielsysteme bis auf wenige Bestandskonten leer — die gibt es, damit sich auch der
@@ -207,7 +211,9 @@ Nach dem ersten Start sind die Objekte importiert, aber noch keine Daten eingele
 2. **LDAP Group Aggregation** — lädt die Gruppen als Entitlements
 3. **LDAP Account Aggregation** — korreliert die Bestandskonten
 4. **JDBC Aggregation** — dasselbe für das zweite Zielsystem
-5. **Refresh Identity Cube** — wertet die Rollen aus und baut die Hierarchie auf
+5. **SCIM Aggregation** — drittes Zielsystem
+6. **WebService Group Aggregation** / **WebService Aggregation** — viertes Zielsystem
+7. **Refresh Identity Cube** — wertet die Rollen aus und baut die Hierarchie auf
 
 Die Gruppen **vor** den Konten zu laden ist kein Zufall: Sonst verweisen die Entitlements
 auf noch unbekannte Gruppen und bleiben ohne Anzeigenamen.
@@ -264,6 +270,8 @@ Tomcat wartet **nicht** auf den Debugger, startet also auch ohne IDE normal.
 | `mailpit` | fängt alle Mails ab |
 | `openldap` | Testverzeichnis mit 100 Benutzern und 50 Gruppen |
 | `ldap-ui` | Browser für das Testverzeichnis |
+| `scim` | SCIM-2.0-Zielsystem |
+| `mockapi` | REST-API-Zielsystem für den Web-Services-Connector |
 | `dbgate` | Datenbank-Oberfläche mit SQL-Editor |
 
 Die Trennung von `iiq-init` und `iiq` sorgt dafür, dass der Import genau einmal läuft.

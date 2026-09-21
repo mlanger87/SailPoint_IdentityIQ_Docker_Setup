@@ -28,7 +28,7 @@
 
   <Application authoritative="true"
                connector="sailpoint.connector.DelimitedFileConnector"
-               featuresString="DIRECT_PERMISSIONS, NO_RANDOM_ACCESS, DISCOVER_SCHEMA"
+               featuresString="DIRECT_PERMISSIONS, NO_RANDOM_ACCESS, DISCOVER_SCHEMA, MANAGER_LOOKUP"
                icon="enterpriseIcon"
                name="HR-Application"
                profileClass=""
@@ -78,6 +78,13 @@
           23-ObjectConfig-Identity.xml). Fehlt sie, liegt der Wert nur im
           XML-Blob, der Filter findet nichts - und die Hierarchie bleibt
           still und ohne Fehlermeldung leer.
+
+          Zweite Voraussetzung: MANAGER_LOOKUP muss in der
+          featuresString der Applikation stehen. Fehlt es, wird der
+          Filter gar nicht erst ausgewertet - gespeichert ist er
+          trotzdem, und es gibt keine Fehlermeldung. Die aus der
+          Oberflaeche exportierten DelimitedFile-Vorlagen fuehren das
+          Feature nicht; LDAP-Applikationen dagegen schon.
 
           Daraus folgt eine Reihenfolge: Die ObjectConfig muss VOR dem
           ersten Aggregationslauf importiert sein. Beim Import in einem

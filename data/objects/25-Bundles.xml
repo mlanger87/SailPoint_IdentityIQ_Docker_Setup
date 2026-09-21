@@ -6,7 +6,7 @@
   ===========================================================================
   Aufgebaut nach dem ueblichen zweistufigen Muster:
 
-    Business-Rolle (organization)  - beschreibt eine Funktion im
+    Business-Rolle (business)      - beschreibt eine Funktion im
                                      Unternehmen, wird automatisch
                                      zugewiesen
         erfordert
@@ -21,6 +21,20 @@
   Die Zuweisung erfolgt ueber "selector" - ein Filter auf Attribute der
   Identitaet, die aus der HR-CSV stammen. Der Task "Refresh Identity
   Cube" wertet diese Regeln aus.
+
+  WICHTIG: Jeder MatchTerm braucht type="IdentityAttribute". Ohne die
+  Angabe wertet IIQ ihn als Entitlement aus - der Selector greift dann
+  nie, ohne jede Fehlermeldung.
+
+  EBENSO WICHTIG: Der Rollentyp muss "business" sein, nicht
+  "organization". Letzteres bildet auf den Typ "organizational" ab,
+  und der traegt laut ObjectConfig:Bundle die Merkmale
+  noAssignmentSelector="true" und noAutoAssignment="true" - er kann
+  also gar keinen Selector haben und wird nie automatisch zugewiesen.
+  Der Import schluckt den Typ trotzdem klaglos.
+
+  Die zuweisbaren Typen zeigt:
+      get ObjectConfig Bundle
 
   Ein Hinweis zur Wirkung: Mit provision=true im Refresh-Task legt IIQ
   den LDAP-Account an, sobald eine Rolle zugewiesen wird und der
@@ -140,7 +154,7 @@
        Business-Rollen - werden automatisch zugewiesen
        =================================================================== -->
 
-  <Bundle displayName="Employee" name="employee" type="organization">
+  <Bundle displayName="Employee" name="employee" type="business">
     <Description>Jede aktive Person im Unternehmen. Traegt die Grundberechtigungen.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
@@ -154,7 +168,7 @@
     <Selector>
       <IdentitySelector>
         <MatchExpression>
-          <MatchTerm name="hrStatus" value="active"/>
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
         </MatchExpression>
       </IdentitySelector>
     </Selector>
@@ -163,7 +177,7 @@
     </Requirements>
   </Bundle>
 
-  <Bundle displayName="IT Staff" name="it-staff" type="organization">
+  <Bundle displayName="IT Staff" name="it-staff" type="business">
     <Description>Mitarbeitende der IT-Abteilung.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
@@ -171,8 +185,8 @@
     <Selector>
       <IdentitySelector>
         <MatchExpression>
-          <MatchTerm name="department" value="IT"/>
-          <MatchTerm name="hrStatus" value="active"/>
+          <MatchTerm name="department" value="IT" type="IdentityAttribute"/>
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
         </MatchExpression>
       </IdentitySelector>
     </Selector>
@@ -181,7 +195,7 @@
     </Requirements>
   </Bundle>
 
-  <Bundle displayName="Sales Staff" name="sales-staff" type="organization">
+  <Bundle displayName="Sales Staff" name="sales-staff" type="business">
     <Description>Mitarbeitende im Vertrieb.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
@@ -189,8 +203,8 @@
     <Selector>
       <IdentitySelector>
         <MatchExpression>
-          <MatchTerm name="department" value="Sales"/>
-          <MatchTerm name="hrStatus" value="active"/>
+          <MatchTerm name="department" value="Sales" type="IdentityAttribute"/>
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
         </MatchExpression>
       </IdentitySelector>
     </Selector>

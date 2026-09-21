@@ -146,13 +146,22 @@
             <Boolean>true</Boolean>
           </value>
         </entry>
-        <!-- Wertet die Zuweisungsregeln der Bundles aus. -->
         <entry key="promoteAttributes">
           <value>
             <Boolean>true</Boolean>
           </value>
         </entry>
-        <entry key="refreshAssignedRoles">
+        <!--
+          Wertet die Selectors der Bundles aus und weist die Rollen zu.
+          Die Option heisst refreshRoleMetadata - ein in Beispielen
+          verbreitetes refreshAssignedRoles gibt es in 8.5 NICHT. Eine
+          unbekannte Option wird stillschweigend ignoriert: die Aufgabe
+          endet mit Success, nur passiert nichts.
+
+          Die gueltigen Optionen listet:
+              get TaskDefinition "Identity Refresh"
+        -->
+        <entry key="refreshRoleMetadata">
           <value>
             <Boolean>true</Boolean>
           </value>

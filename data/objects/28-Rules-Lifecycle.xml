@@ -146,4 +146,67 @@
     ]]></Source>
   </Rule>
 
+  <!-- ===================================================================
+       Abgrenzung Leaver gegen Joiner
+       ===================================================================
+       Beide Gruppen wechseln inactive von false auf true: Eine
+       Identitaet mit kuenftigem Eintrittsdatum wird zunaechst aktiv
+       angelegt und dann gesperrt. Der Trigger allein kann das nicht
+       unterscheiden.
+
+       Ein Selector mit MatchTerm reichte dafuer NICHT aus: bei
+       kuenftigen Eintritten ist endDate null, nicht leer. Ein
+       negative="true" mit value="" prueft auf "ungleich leerer String"
+       und trifft damit auch auf null zu - gemessen: 10 Leaver-Laeufe
+       bei 4 echten Leavern.
+
+       Diese Regel prueft stattdessen explizit auf einen gesetzten Wert.
+  -->
+  <Rule language="beanshell" name="HR Leaver Trigger" type="IdentityTrigger">
+    <Description>
+      Trifft nur zu, wenn ein Austrittsdatum gesetzt und erreicht ist -
+      grenzt den Leaver- vom Joiner-Fall ab.
+    </Description>
+    <Signature returnType="boolean">
+      <Inputs>
+        <Argument name="previousIdentity" type="sailpoint.object.Identity"/>
+        <Argument name="newIdentity" type="sailpoint.object.Identity"/>
+      </Inputs>
+      <Returns>
+        <Argument name="value" type="boolean"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import sailpoint.object.Identity;
+      import sailpoint.tools.Util;
+
+      // Nicht gebundene Argumente sind in BeanShell "void", nicht null.
+      Identity neu = null;
+      if (newIdentity != void && newIdentity != null) {
+          neu = newIdentity;
+      }
+      Identity alt = null;
+      if (previousIdentity != void && previousIdentity != null) {
+          alt = previousIdentity;
+      }
+
+      if (neu == null) {
+          return false;
+      }
+
+      // Der Wechsel von aktiv auf gesperrt.
+      boolean wurdeGesperrt = (alt == null || !alt.isInactive())
+                              && neu.isInactive();
+      if (!wurdeGesperrt) {
+          return false;
+      }
+
+      // Entscheidend: nur mit gesetztem Austrittsdatum ist es ein
+      // Austritt. Bei einem noch nicht erreichten Eintritt ist das Feld
+      // null.
+      String ende = neu.getStringAttribute("endDate");
+      return Util.isNotNullOrEmpty(ende);
+    ]]></Source>
+  </Rule>
+
 </sailpoint>

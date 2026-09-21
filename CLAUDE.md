@@ -496,6 +496,126 @@ Nach dem Import der ObjectConfig muss die Aggregation deshalb **erneut** laufen.
 Merksatz: Erst `ObjectConfig`, dann Aggregation, dann Refresh. Ein nachträglich ergänztes
 durchsuchbares Attribut erfordert einen weiteren Aggregationslauf.
 
+### Stille Fehlkonfiguration — das wiederkehrende Muster
+
+Vier Fehler dieses Aufbaus hatten dieselbe Signatur: **kein Fehler, kein Logeintrag, keine
+Wirkung.** Das Objekt wird sauber importiert und gespeichert; ausgewertet wird es nicht.
+
+| Fehlende Angabe | Folge |
+|---|---|
+| `AttributeSource` ohne `ApplicationRef` | Die Regel wird nie aufgerufen |
+| `MatchTerm` ohne `type="IdentityAttribute"` | IIQ wertet ihn als Entitlement — der Selector greift nie |
+| Attribut ohne `extendedNumber` | Der Wert liegt nur im XML-Blob, kein Filter findet ihn |
+| `featuresString` ohne `MANAGER_LOOKUP` | Der `managerCorrelationFilter` wird ignoriert |
+
+Der letzte Fall ist besonders tückisch: Der Filter steht korrekt in der Applikation, ein
+`get Application` zeigt ihn an — nur ausgewertet wird er nicht. Die aus der Oberfläche
+exportierten **DelimitedFile-Vorlagen führen `MANAGER_LOOKUP` nicht**, LDAP-Applikationen
+dagegen schon.
+
+**Konsequenz für die Fehlersuche:** Ein Blick in das gespeicherte Objekt genügt nicht — er
+zeigt nur, dass der Wert *da* ist. Belastbar ist nur der Vergleich von erwartetem und
+tatsächlichem Ergebnis:
+
+```
+// Regel isoliert aufrufen und mit dem Attributwert vergleichen
+Object erwartet = context.runRule(rule, args);
+boolean tatsaechlich = identity.isInactive();
+```
+
+So ließ sich zeigen, dass `HR Set Inactive` das richtige Ergebnis lieferte und trotzdem
+nie zur Anwendung kam.
+
+### `MatchTerm`: `null` ist nicht leer
+
+Zur Abgrenzung des Leaver- vom Joiner-Fall sollte ein Selector prüfen, ob `endDate`
+gesetzt ist:
+
+```xml
+<MatchTerm name="endDate" type="IdentityAttribute" negative="true" value=""/>
+```
+
+Das trifft auch auf künftige Eintritte zu, denn dort ist `endDate` **`null`**, nicht leer —
+und `null` ist ungleich `""`. Gemessen: 10 Leaver-Läufe bei 4 echten Leavern.
+
+Gelöst über eine `TriggerRule` mit `Util.isNotNullOrEmpty(...)` und `type="Rule"` am
+Trigger. Letzteres bewusst: Ob IIQ bei `type="AttributeChange"` eine zusätzliche
+`TriggerRule` überhaupt auswertet, ist nicht belegt — keiner der mitgelieferten Trigger
+kombiniert beides.
+
+**Zur Sache selbst:** Joiner und Leaver sind über `inactive` allein nicht unterscheidbar.
+Beide wechseln von `false` auf `true`, denn wer erst nächsten Monat anfängt, ist heute
+ebenso gesperrt wie jemand, der gegangen ist. Das Austrittsdatum trennt die Fälle.
+
+### Web-Services-Connector: vier Stolpersteine
+
+Die maßgebliche Referenz ist **`WEB-INF/config/connector/WebServices.xml`** im Paket — die
+Formulardefinition, aus der die Oberfläche ihre Felder baut. Daraus:
+
+```
+authenticationMethod:  BasicLogin | OAuthLogin | OAuth2Login | No Auth
+operationType:         Test Connection | Account Aggregation |
+                       Account Delta Aggregation | Group Aggregation |
+                       Get Object | Get Object-Group | Create Account |
+                       Update Account | Delete Account |
+                       Enable Account | Disable Account
+```
+
+**1. `entry` verträgt keinen CDATA-Inhalt.** Die DTD sagt
+`<!ELEMENT entry ((key)?,(value)?)>` — der JSON-Rumpf gehört in ein
+`<value><String><![CDATA[…]]></String></value>`.
+
+**2. `responseCode` will `Integer`.** Mit `<String>200</String>` bricht der Connector mit
+`class java.lang.String cannot be cast to class java.lang.Integer` ab.
+
+**3. Der Name des Rumpf-Feldes hängt am `bodyFormat`:**
+
+| `bodyFormat` | Feldname |
+|---|---|
+| `raw` | **`rawBody`** |
+| `json` | `jsonBody` |
+
+Der falsche Name lässt `WebServiceFacadeV2.initInternal` mit einer NullPointerException
+abbrechen — die Konsole meldet nur **`null`**, ohne Hinweis auf die Ursache. Gefunden
+durch Eingrenzen: eine minimale Applikation, die lief, dann schrittweise erweitert.
+
+**4. `paginationSteps` ist ein URL-Fragment, kein Schlüsselwort.** In der
+Formulardefinition ist es ein `textarea`. Der Wert `"offset"` wird nicht als Paging
+erkannt; der Connector ruft denselben Endpunkt endlos auf — gemessen **11.943 Aufrufe**,
+bis die Aufgabe von Hand beendet wurde. Bei kleinen Datenmengen Paging besser weglassen.
+
+Bei Endlosschleifen: Die Aufgabe hängt auch nach einem `docker compose restart iiq` noch
+als laufend in `spt_task_result`. Erst nach
+
+```sql
+UPDATE spt_task_result SET completion_status='Terminated' WHERE completion_status IS NULL;
+```
+
+lässt sie sich neu starten.
+
+### SCIM 2.0: `authType` und der Klassenlader
+
+**`authType="oauthBearer"`** für einen statischen Token — nicht `oauth2`, das entspricht
+`OAuth2Login` und erwartet einen vollen Token-Fluss. Mit dem falschen Wert antwortet der
+Server mit `401 invalidCredentials`. Die gültigen Werte:
+
+```
+javap -p -constants openconnector/connector/scim2/SCIM2Constants.class
+  AUTH_TYPE_BASIC             = "Basic"
+  AUTH_TYPE_BEARER            = "oauthBearer"
+  AUTH_TYPE_OAUTH2            = "OAuth2Login"
+  AUTH_TYPE_NO_AUTHENTICATION = "No Auth"
+```
+
+**`Class.forName` beweist bei Connector-Bundles nichts.** Ein Test auf
+`openconnector.connector.scim2.SCIM2Connector` meldet `ClassNotFoundException`, obwohl die
+Klasse in `connector-bundle-webservices.jar` liegt: Der `OpenConnectorAdapter` lädt sie
+über einen eigenen Klassenlader. Aussagekräftig ist nur
+
+```
+connectorDebug "<Applikation>" test
+```
+
 ### Nach einem Umzug des Docker-Datenverzeichnisses
 
 Ein Verschieben des Docker-Data-Root von `C:` nach `E:` hat Images und Volumes hier
