@@ -14,7 +14,9 @@
 !docker/
 !installer/*.zip
 !installer/*.jar
-!data/
 
-# Innerhalb der erlaubten Pfade aufraeumen
-data/logs/
+# data/ bleibt bewusst DRAUSSEN: Kein Dockerfile kopiert daraus, alles
+# laeuft ueber Bind-Mounts. Waere es im Kontext, wuerde jede Aenderung
+# an einer XML-Datei in data/objects den Kontext-Hash aendern und die
+# Builds unnoetig anstossen - bei Plugin-ZIPs zusaetzlich viel
+# Uebertragung an den Daemon.

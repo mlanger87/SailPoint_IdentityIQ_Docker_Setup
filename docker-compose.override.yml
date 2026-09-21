@@ -22,20 +22,20 @@ services:
       # Debugger, startet also auch ohne angehaengte IDE normal.
       JPDA_ADDRESS: "0.0.0.0:8000"
       JPDA_TRANSPORT: "dt_socket"
-      CATALINA_OPTS: >-
-        -Xms1g
-        -Xmx${IIQ_HEAP:-4g}
-        -XX:+UseG1GC
-        -Djava.awt.headless=true
-        -Diiq.hostname=${IIQ_NODE:-iiq-dev}
-        --add-opens=java.base/java.lang=ALL-UNNAMED
-        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
-        --add-opens=java.base/java.util=ALL-UNNAMED
-        --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
-        -Dcom.sun.jndi.ldap.connect.pool.timeout=3000
-        -Dsailpoint.debugPages=true
+      # CATALINA_OPTS wird bewusst NICHT wiederholt.
+      #
+      # Compose ersetzt bei environment einen Schluessel vollstaendig,
+      # statt ihn zu ergaenzen. Eine Kopie hier wuerde bei jeder
+      # Aenderung an der Basis stillschweigend veralten - genau das war
+      # der Fall: -Dcom.sun.jndi.ldap.connect.pool.protocol fehlte im
+      # Normalbetrieb, weil der Override die Basis ueberschrieb.
+      #
+      # Stattdessen haengt die Basis ${IIQ_EXTRA_OPTS} an. Der Wert
+      # steht in der .env (IIQ_EXTRA_OPTS) - Compose expandiert
+      # ${...} nur von dort, nicht aus dem environment-Block eines
+      # anderen Dienstes.
     ports:
-      - "${IIQ_DEBUG_PORT:-8000}:8000"
+      - "127.0.0.1:${IIQ_DEBUG_PORT:-8000}:8000"
     # "jpda run" aktiviert den Debug-Agenten.
     command: ["catalina.sh", "jpda", "run"]
     volumes:

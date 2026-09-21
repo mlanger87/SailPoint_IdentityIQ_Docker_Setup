@@ -616,6 +616,124 @@ Klasse in `connector-bundle-webservices.jar` liegt: Der `OpenConnectorAdapter` l
 connectorDebug "<Applikation>" test
 ```
 
+### Compose-Override: Listen werden gemergt, Skalare ersetzt
+
+Ein Unterschied mit Folgen. `docker-compose.override.yml` wird automatisch geladen und ist
+damit der **Normalbetrieb**:
+
+| Typ | Verhalten |
+|---|---|
+| `volumes:`, `ports:` (Listen) | werden **zusammengeführt** |
+| `environment:`-Einträge (Skalare) | werden **ersetzt** |
+
+Dadurch war `CATALINA_OPTS` im Override eine stille Kopie, die auseinanderlief:
+`-Dcom.sun.jndi.ldap.connect.pool.protocol` stand nur in der Basis und war im Alltag
+**nie aktiv**. Nachweisbar mit:
+
+```
+docker compose config | grep CATALINA_OPTS
+```
+
+Gelöst über `${IIQ_EXTRA_OPTS}`: Die Basis hängt die Variable an, der Override setzt nur
+diesen Zusatz. Wichtig dabei — Compose expandiert `${...}` nur aus der `.env`, nicht aus
+dem `environment`-Block eines anderen Dienstes.
+
+### Das Fehlermuster im Entrypoint ist sicherheitskritisch
+
+`iiq_console_checked()` bricht bei einem Treffer ab; wegen `set -e` endet der
+Init-Container dann mit Fehler, und `iiq` startet wegen
+`condition: service_completed_successfully` **gar nicht erst**. Ein falsch positiver
+Treffer blockiert also den gesamten Stack.
+
+Das ursprüngliche Muster enthielt `Unable to ` und das blanke `Exception` — beides kommt in
+harmlosen Meldungen vor (`Unable to find localized message for key …`). Jetzt:
+
+```
+^Error:|^Caused by:|^[[:space:]]*at sailpoint\.|(java|javax|org|sailpoint|bsh)\.[A-Za-z.]*(Exception|Error)
+```
+
+Gegen die realen Meldungen dieser Sitzung geprüft: erkennt `RuntimeException`,
+`SAXParseException`, `bsh.EvalError`, Stacktraces und `GeneralException`; lässt
+`Unable to find…`, `ExceptionHandler` und normale Importausgaben durch.
+
+**Wer das Muster ändert, testet es gegen beide Listen** — ein zu enges Muster lässt echte
+Fehler durch, ein zu breites blockiert den Start.
+
+### Generator: Mindestbesetzung je Abteilung
+
+`max(MIN_PRO_ABTEILUNG, …)` hebt kleine Abteilungen an; in der Summe liegt das über dem
+Sollwert, die Rundungsdifferenz wird **negativ**. Früher ging sie pauschal auf
+`headcounts[0]` — dadurch wurde Sales als größte Abteilung negativ und in `build_people`
+stillschweigend übersprungen:
+
+```
+--users   5  ->  14 Personen, Sales fehlt
+--users  16  ->  16 Personen, Sales fehlt
+--users  20  ->  20 Personen, vollständig
+```
+
+Jetzt wird der Fehlbetrag reihum abgezogen, ohne unter den Mindestwert zu gehen, und
+`main()` lehnt zu kleine Werte mit einer Meldung ab statt still zu klemmen.
+
+### Shell-Skripte: literale CR-Bytes machen die Datei für Git binär
+
+`verify.sh` enthielt sieben literale CR-Bytes in `tr -d '<CR>'`. Folge:
+
+```
+$ git ls-files --eol scripts/verify.sh
+i/-text w/-text attr/text eol=lf   scripts/verify.sh
+```
+
+`-text` heißt: Git behandelt die Datei als **binär**, und die `eol=lf`-Normalisierung aus
+`.gitattributes` greift nicht mehr. Damit war ausgerechnet im Prüfskript die Lücke offen,
+die oben unter „CRLF unter Windows" als Container-Killer beschrieben ist.
+
+Statt eines literalen CR gehört dort `tr -d '[:space:]'` hin. Prüfen mit
+`git ls-files --eol scripts/`: alle Shell-Skripte müssen `i/lf w/lf` zeigen.
+
+### Ports an 127.0.0.1 binden
+
+Docker veröffentlicht Ports ohne Präfix auf `0.0.0.0` — die Datenbank wäre dann im
+gesamten Netz erreichbar, etwa im Kundennetz oder im Hotel-WLAN. Alle Bindungen tragen
+deshalb `127.0.0.1:`; der Zugriff vom eigenen Rechner bleibt möglich.
+
+### `data/` gehört nicht in den Build-Kontext
+
+Kein Dockerfile kopiert daraus — alles läuft über Bind-Mounts. Stünde es in der Whitelist
+von `.dockerignore`, würde jede Änderung an einer XML-Datei in `data/objects` den
+Kontext-Hash ändern und Builds unnötig anstoßen.
+
+### YAML-Faltblöcke kennen keine Kommentare
+
+In `CATALINA_OPTS: >-` wird **jede** Zeile Teil des Wertes — auch eine, die mit `#`
+beginnt. Sie landet als Argument bei der JVM, und Tomcat startet nicht mehr:
+
+```
+iiq  | Error: Could not find or load main class ssl
+iiq  | <Java gibt seine vollständige Optionshilfe aus>
+```
+
+Erläuterungen gehören deshalb **vor** den Block, nicht hinein. Prüfen lässt sich der
+tatsächliche Wert mit:
+
+```
+docker compose config | grep CATALINA_OPTS
+```
+
+**Werte mit Leerzeichen lassen sich im Faltblock gar nicht übergeben.** Beispiel
+`-Dcom.sun.jndi.ldap.connect.pool.protocol=plain ssl`:
+
+- ohne Anführungszeichen zerlegt die Shell die Option, `ssl` wird ein eigenes Argument
+- mit Anführungszeichen landen diese als Literale im Wert
+
+Beides verhindert den Start. Die Option ist deshalb nicht gesetzt; wer sie braucht, nutzt
+`JAVA_TOOL_OPTIONS` im `environment`-Block, wo normale YAML-Quotierung gilt.
+
+Der Fehler war vorher **latent**: Der Override überschrieb `CATALINA_OPTS` vollständig und
+enthielt die Zeile nicht. Erst als die Duplizierung aufgelöst wurde, wurde die Option
+wirksam — und brach den Start. Ein Beispiel dafür, dass das Beheben einer Inkonsistenz
+einen verborgenen Fehler freilegen kann.
+
 ### Nach einem Umzug des Docker-Datenverzeichnisses
 
 Ein Verschieben des Docker-Data-Root von `C:` nach `E:` hat Images und Volumes hier

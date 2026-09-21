@@ -75,6 +75,10 @@ DEPT_HR = "Human Resources"
 # Fester Startwert: gleicher Aufruf erzeugt exakt dieselben Daten.
 SEED = 20250921
 
+# Mindestbesetzung je Abteilung. Darunter waere die Hierarchie
+# (Abteilungsleitung, Teamleitung, Mitarbeit) nicht darstellbar.
+MIN_PRO_ABTEILUNG = 2
+
 # Stichtag fuer die Datumsberechnung. Bewusst NICHT date.today(): sonst
 # aendert sich die Datei bei jedem Lauf und die Reproduzierbarkeit waere
 # dahin. Die Datumswerte werden relativ zu diesem Tag erzeugt.
@@ -280,10 +284,42 @@ def build_people(count: int, rnd: random.Random) -> list[dict]:
     """
     weights = [d[3] for d in DEPARTMENTS]
     total = sum(weights)
-    headcounts = [max(2, round(count * w / total)) for w in weights]
+    headcounts = [max(MIN_PRO_ABTEILUNG, round(count * w / total))
+                  for w in weights]
 
-    # Rundungsdifferenz auf die groesste Abteilung legen.
-    headcounts[0] += count - sum(headcounts)
+    # Die Rundungsdifferenz verteilen.
+    #
+    # Der Mindestwert je Abteilung hebt kleine Abteilungen an; in der
+    # Summe liegt das ueber dem Sollwert, die Differenz ist dann
+    # NEGATIV. Frueher ging sie pauschal auf headcounts[0] - bei
+    # kleinen Werten wurde die groesste Abteilung dadurch negativ und in
+    # build_people stillschweigend uebersprungen. Gemessen: --users 5
+    # lieferte 14 Personen, und Sales fehlte komplett.
+    #
+    # Jetzt wird die Differenz schrittweise verteilt, und keine
+    # Abteilung faellt unter den Mindestwert.
+    differenz = count - sum(headcounts)
+    if differenz > 0:
+        # Ueberschuss auf die groesste Abteilung.
+        headcounts[0] += differenz
+    else:
+        # Fehlbetrag reihum abziehen, grosse Abteilungen zuerst,
+        # solange sie ueber dem Mindestwert bleiben.
+        rest = -differenz
+        while rest > 0:
+            abgezogen = False
+            for i in range(len(headcounts)):
+                if rest == 0:
+                    break
+                if headcounts[i] > MIN_PRO_ABTEILUNG:
+                    headcounts[i] -= 1
+                    rest -= 1
+                    abgezogen = True
+            if not abgezogen:
+                # Alle Abteilungen sind am Mindestwert - der Rest laesst
+                # sich nicht mehr abziehen. Sollte durch die Pruefung in
+                # main() nicht vorkommen.
+                break
 
     used_uids: set[str] = set()
     people: list[dict] = []
@@ -686,6 +722,29 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=SEED,
                         help="Zufallsstartwert fuer reproduzierbare Laeufe")
     args = parser.parse_args()
+
+    # Eingaben pruefen, statt sie stillschweigend zu klemmen.
+    minimum = MIN_PRO_ABTEILUNG * len(DEPARTMENTS)
+    if args.users < minimum:
+        parser.error(
+            f"--users muss mindestens {minimum} sein: "
+            f"{len(DEPARTMENTS)} Abteilungen mit je {MIN_PRO_ABTEILUNG} "
+            f"Personen. Darunter liesse sich die Hierarchie nicht abbilden.")
+
+    max_gruppen = (len(DEPARTMENTS)
+                   + len({d[1] for d in DEPARTMENTS})
+                   + 2
+                   + len(APPLICATION_GROUPS))
+    if args.groups > max_gruppen:
+        parser.error(
+            f"--groups kann hoechstens {max_gruppen} sein: "
+            f"{len(DEPARTMENTS)} Abteilungen, "
+            f"{len({d[1] for d in DEPARTMENTS})} Standorte, 2 Sammelgruppen "
+            f"und {len(APPLICATION_GROUPS)} Anwendungsgruppen.")
+    if args.groups < 1:
+        parser.error("--groups muss mindestens 1 sein.")
+    if args.seed_accounts < 0:
+        parser.error("--seed-accounts darf nicht negativ sein.")
 
     rnd = random.Random(args.seed)
     repo = Path(__file__).resolve().parent.parent

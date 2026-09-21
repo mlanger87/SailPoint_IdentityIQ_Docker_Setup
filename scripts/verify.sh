@@ -25,9 +25,32 @@ fail()  { printf '  [FAIL] %s\n' "$1"; FAILED=1; }
 info()  { printf '         %s\n' "$1"; }
 
 # ---------------------------------------------------------------------------
+# Hilfsfunktionen
+# ---------------------------------------------------------------------------
+
+# Fuehrt eine Abfrage aus und liefert das Ergebnis ohne Leerraum.
+# Fasst ein Muster zusammen, das sonst achtmal wiederholt wuerde.
+pq() {
+    docker compose exec -T postgres psql -U postgres -d "$1" -tAc "$2"         2>/dev/null | tr -d '[:space:]'
+}
+
+# Gibt nur Ziffern zurueck, sonst 0.
+#
+# Noetig, weil psql bei fehlendem Container oder fehlender Tabelle
+# Fehlertext statt einer Zahl liefert. Ein ${var:-0} greift dann NICHT
+# (die Variable ist ja nicht leer), und der anschliessende Vergleich
+# scheitert mit "integer expression expected".
+zahl() {
+    case "$1" in
+        ''|*[!0-9]*) echo 0 ;;
+        *)           echo "$1" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 step "1. Container"
 # ---------------------------------------------------------------------------
-for svc in postgres iiq mailpit openldap dbgate ldap-ui; do
+for svc in postgres iiq mailpit openldap dbgate ldap-ui scim mockapi; do
     cid="$(docker compose ps -q "${svc}" 2>/dev/null)"
     if [ -z "${cid}" ]; then
         fail "${svc}: laeuft nicht"
@@ -154,9 +177,9 @@ step "7. Systemlandschaft: Quelle und Zielsysteme"
 # Ob die Aggregation schon Daten geliefert hat, haengt davon ab, ob die
 # Aufgaben gelaufen sind - das entscheidet der Anwender (Setup > Tasks).
 
-apps="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc         "SELECT string_agg(name, ',' ORDER BY name) FROM spt_application;" 2>/dev/null | tr -d '')"
+apps="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc         "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_application;" 2>/dev/null | tr -d '[:space:]')"
 
-for erwartet in HR-Application LDAP-Target JDBC-Target; do
+for erwartet in HR-Application LDAP-Target JDBC-Target SCIM-Target WebService-Target; do
     if echo "${apps}" | grep -q "${erwartet}"; then
         ok "Applikation vorhanden: ${erwartet}"
     else
@@ -166,31 +189,35 @@ done
 
 # Die HR-CSV muss im Container unter genau dem Pfad liegen, der in der
 # Application steht - ein haeufiger Fehler nach Aenderungen am Mount.
-if docker compose exec -T iiq test -r /data/hr/HR-people.csv 2>/dev/null; then
-    zeilen="$(docker compose exec -T iiq sh -c 'wc -l < /data/hr/HR-people.csv' 2>/dev/null | tr -d ' ')"
+# Der Pfad steht in einfachen Anfuehrungszeichen innerhalb von sh -c:
+# Git Bash unter Windows wandelt sonst /data/hr in einen
+# Windows-Pfad um (MSYS-Pfadkonvertierung), und der Test schlaegt
+# fehl, obwohl die Datei im Container liegt.
+if docker compose exec -T iiq sh -c 'test -r /data/hr/HR-people.csv' 2>/dev/null; then
+    zeilen="$(zahl "$(docker compose exec -T iiq sh -c 'wc -l < /data/hr/HR-people.csv' 2>/dev/null | tr -d '[:space:]')")"
     ok "HR-CSV im Container lesbar (${zeilen} Zeilen inkl. Kopfzeile)"
 else
     fail "HR-CSV nicht unter /data/hr/HR-people.csv erreichbar"
     info "Mount pruefen: docker compose config | grep -A3 'data/hr'"
 fi
 
-target_accounts="$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                    'SELECT count(*) FROM targetapp."IIQData";' 2>/dev/null | tr -d ' ')"
+target_accounts="$(zahl "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                    'SELECT count(*) FROM targetapp."IIQData";' 2>/dev/null | tr -d '[:space:]')")"
 if [ -n "${target_accounts}" ]; then
-    target_rollen="$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                      'SELECT count(*) FROM targetapp."IIQRoles";' 2>/dev/null | tr -d ' ')"
+    target_rollen="$(zahl "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                      'SELECT count(*) FROM targetapp."IIQRoles";' 2>/dev/null | tr -d '[:space:]')")"
     ok "Zieldatenbank targetdb erreichbar (${target_accounts} Konten, ${target_rollen} Rollen)"
 else
     fail "Zieldatenbank targetdb nicht lesbar"
 fi
 
 # Ohne die Regeln kann IIQ ins JDBC-Ziel nicht schreiben.
-regeln="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc           "SELECT count(*) FROM spt_rule WHERE name LIKE 'JDBC-Target%';" 2>/dev/null | tr -d ' ')"
+regeln="$(zahl "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc           "SELECT count(*) FROM identityiq.spt_rule WHERE name LIKE 'JDBC-Target%';" 2>/dev/null | tr -d '[:space:]')")"
 if [ "${regeln:-0}" -ge 6 ]; then
     ok "JDBC-Provisioning-Regeln vorhanden (${regeln})"
 else
     fail "Es fehlen JDBC-Regeln (gefunden: ${regeln:-0}, erwartet: 6)"
 fi
 
-ldap_gruppen="$(docker compose exec -T openldap ldapsearch -x -H ldap://localhost:1389                 -D "cn=admin,dc=example,dc=com" -w adminpassword                 -b "ou=groups,dc=example,dc=com" '(objectClass=groupOfNames)' dn 2>/dev/null                 | grep -c '^dn:' | tr -d ' ')"
+ldap_gruppen="$(zahl "$(docker compose exec -T openldap ldapsearch -x -H ldap://localhost:1389                 -D "cn=admin,dc=example,dc=com" -w adminpassword                 -b "ou=groups,dc=example,dc=com" '(objectClass=groupOfNames)' dn 2>/dev/null                 | grep -c '^dn:' | tr -d '[:space:]')")"
 if [ "${ldap_gruppen:-0}" -ge 10 ]; then
     ok "LDAP-Gruppen als Entitlements vorhanden (${ldap_gruppen})"
 else
@@ -198,9 +225,28 @@ else
     info "Bei 0: LDIF-Import abgebrochen - groupOfNames braucht mindestens ein member"
 fi
 
+# Die beiden zuletzt ergaenzten Zielsysteme sind eigene Dienste - ohne
+# sie laufen SCIM- und WebService-Aggregation ins Leere.
+scim_port="$(grep -E '^SCIM_PORT=' .env 2>/dev/null | cut -d= -f2)"
+scim_port="${scim_port:-8100}"
+if curl -s --max-time 10 -H "Authorization: Bearer ${SCIM_API_KEY:-secret}"         "http://localhost:${scim_port}/ServiceProviderConfig" >/dev/null 2>&1; then
+    ok "SCIM-Server erreichbar auf http://localhost:${scim_port}"
+else
+    fail "SCIM-Server antwortet nicht"
+fi
+
+mock_port="$(grep -E '^MOCKAPI_PORT=' .env 2>/dev/null | cut -d= -f2)"
+mock_port="${mock_port:-8200}"
+# /api/v1/health kommt bewusst ohne Token aus.
+if curl -s --max-time 10 "http://localhost:${mock_port}/api/v1/health" >/dev/null 2>&1; then
+    ok "Mock-REST-API erreichbar auf http://localhost:${mock_port}"
+else
+    fail "Mock-REST-API antwortet nicht"
+fi
+
 # Ohne extendedNumber findet kein Filter die Attribute - dann laufen
 # Rollenzuweisung und Manager-Korrelation still ins Leere.
-erweitert="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc              "SELECT count(*) FROM spt_identity WHERE extended1 IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+erweitert="$(zahl "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc              "SELECT count(*) FROM identityiq.spt_identity WHERE extended1 IS NOT NULL;" 2>/dev/null | tr -d '[:space:]')")"
 if [ "${erweitert:-0}" -gt 0 ]; then
     ok "Identitaetsattribute befuellt (${erweitert} mit employeeNumber)"
 else

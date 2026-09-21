@@ -154,6 +154,19 @@
                   <value>
                     <Map>
                       <entry key="nativeIdentity" value="id"/>
+                      <!--
+                        id muss zusaetzlich abgebildet werden: Das Schema
+                        fuehrt identityAttribute="id", und der Connector
+                        sucht genau diesen Namen in der erzeugten Map.
+                        nativeIdentity allein genuegt nicht - die
+                        Aggregation meldet dann Success und verarbeitet
+                        null Datensaetze.
+
+                        Beim Gruppen-Schema faellt das nicht auf, weil
+                        dort identityAttribute="name" ist und "name"
+                        ohnehin im Mapping steht.
+                      -->
+                      <entry key="id" value="id"/>
                       <entry key="employeeId" value="employeeId"/>
                       <entry key="login" value="login"/>
                       <entry key="firstName" value="firstName"/>

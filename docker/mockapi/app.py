@@ -22,12 +22,15 @@
 # genau daran die Zuordnung im Connector haengt: rootPath muss darauf
 # zeigen. Eine flache Liste wuerde diesen Teil nicht pruefen.
 #
-# Authentifizierung ueber Bearer-Token (API_TOKEN), passend zu
-# authenticationMethod="OAuthLogin" im Connector.
+# Authentifizierung wahlweise ueber Bearer-Token (API_TOKEN) oder
+# Basic Auth (BASIC_USER/BASIC_PASSWORD) - passend zu den beiden
+# gaengigen Werten von authenticationMethod im Connector:
+# "OAuthLogin" bzw. "BasicLogin".
 #
 # Die Daten stammen aus derselben HR-CSV wie die anderen Zielsysteme -
 # die employeeNumber ist damit ueberall derselbe Korrelationsschluessel.
 # ===========================================================================
+import base64
 import csv
 import json
 import os
@@ -40,6 +43,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 API_TOKEN = os.environ.get("API_TOKEN", "mocktoken")
+
+# Basic Auth als Alternative zum Token. Der Web-Services-Connector
+# beherrscht beides (authenticationMethod="BasicLogin" bzw.
+# "OAuthLogin"); der Mock akzeptiert deshalb beide Varianten, damit
+# sich die Anbindung umstellen laesst, ohne den Server anzufassen.
+BASIC_USER = os.environ.get("BASIC_USER", "iiq")
+BASIC_PASSWORD = os.environ.get("BASIC_PASSWORD", "iiqpassword")
 PORT = int(os.environ.get("PORT", "8000"))
 CSV_PFAD = Path(os.environ.get("HR_CSV", "/data/hr/HR-people.csv"))
 
@@ -89,13 +99,28 @@ def lade_startdaten() -> None:
         print(f"[mockapi] {CSV_PFAD} nicht gefunden - starte ohne Bestandskonten.")
         return
 
-    with CSV_PFAD.open(encoding="utf-8") as f:
-        zeilen = list(csv.DictReader(f, delimiter=";"))
+    try:
+        with CSV_PFAD.open(encoding="utf-8") as f:
+            zeilen = list(csv.DictReader(f, delimiter=";"))
+    except (OSError, UnicodeDecodeError, csv.Error) as e:
+        print(f"[mockapi] {CSV_PFAD} nicht lesbar ({e}) - "
+              f"starte ohne Bestandskonten.")
+        return
 
     # Nur aktive Personen als Bestandskonten, und nur die ersten paar.
     aktive = [z for z in zeilen if z.get("status") == "active"]
+    uebersprungen = 0
     for i, z in enumerate(aktive[:SEED_ANZAHL]):
-        uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, z["employeeNumber"]))
+        # Fehlende oder leere Spalten duerfen den Start nicht verhindern.
+        # Der Docstring verspricht, dass der Dienst auch ohne Testdaten
+        # hochkommt - das muss auch fuer eine unvollstaendige Datei
+        # gelten, nicht nur fuer eine fehlende.
+        nummer = (z.get("employeeNumber") or "").strip()
+        mail = (z.get("email") or "").strip()
+        if not nummer:
+            uebersprungen += 1
+            continue
+        uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, nummer))
         # Die ersten beiden bekommen mehr Rechte - damit die
         # Entitlement-Aggregation etwas zu tun hat.
         zugeordnet = ["grp-portal-read"]
@@ -106,23 +131,24 @@ def lade_startdaten() -> None:
 
         _benutzer[uid] = {
             "id": uid,
-            "employeeId": z["employeeNumber"],
-            "login": z["email"].split("@")[0],
-            "firstName": z["firstName"],
-            "lastName": z["lastName"],
-            "fullName": z["displayName"],
-            "email": z["email"],
-            "jobTitle": z["title"],
-            "department": z["department"],
-            "office": z["location"],
+            "employeeId": nummer,
+            "login": mail.split("@")[0] if "@" in mail else f"user{nummer}",
+            "firstName": z.get("firstName", ""),
+            "lastName": z.get("lastName", ""),
+            "fullName": z.get("displayName", ""),
+            "email": mail,
+            "jobTitle": z.get("title", ""),
+            "department": z.get("department", ""),
+            "office": z.get("location", ""),
             "status": "ACTIVE",
             "roles": zugeordnet,
             "createdAt": jetzt(),
             "updatedAt": jetzt(),
         }
 
+    hinweis = f", {uebersprungen} Zeile(n) uebersprungen" if uebersprungen else ""
     print(f"[mockapi] {len(_benutzer)} Bestandskonten, "
-          f"{len(_gruppen)} Gruppen geladen.")
+          f"{len(_gruppen)} Gruppen geladen{hinweis}.")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -130,7 +156,10 @@ class Handler(BaseHTTPRequestHandler):
     # Die Standardausgabe des BaseHTTPRequestHandler geht auf stderr und
     # ist unstrukturiert - hier eine knappe Zeile je Anfrage.
     def log_message(self, format, *args):
-        print(f"[mockapi] {self.command} {self.path} -> {args[1]}")
+        # BaseHTTPRequestHandler ruft log_message auch aus log_error
+        # mit abweichender Signatur auf - args[1] gibt es dann nicht.
+        status = args[1] if len(args) > 1 else "-"
+        print(f"[mockapi] {self.command} {self.path} -> {status}")
 
     # -- Hilfsfunktionen --------------------------------------------------
 
@@ -153,10 +182,28 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _autorisiert(self) -> bool:
+        """
+        Akzeptiert Bearer-Token UND Basic Auth.
+
+        So laesst sich die Applikation in IdentityIQ zwischen
+        authenticationMethod="OAuthLogin" und "BasicLogin" umstellen,
+        ohne den Mock neu zu konfigurieren.
+        """
         kopf = self.headers.get("Authorization", "")
+
         if kopf == f"Bearer {API_TOKEN}":
             return True
-        self._fehler(401, "Ungueltiges oder fehlendes Token")
+
+        if kopf.startswith("Basic "):
+            try:
+                roh = base64.b64decode(kopf[6:]).decode("utf-8")
+                benutzer, _, passwort = roh.partition(":")
+                if benutzer == BASIC_USER and passwort == BASIC_PASSWORD:
+                    return True
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        self._fehler(401, "Ungueltige oder fehlende Anmeldedaten")
         return False
 
     def _rumpf(self) -> dict | None:
@@ -335,7 +382,9 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     lade_startdaten()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"[mockapi] Lauscht auf Port {PORT}, Token: {API_TOKEN}")
+    print(f"[mockapi] Lauscht auf Port {PORT}")
+    print(f"[mockapi]   Bearer-Token: {API_TOKEN}")
+    print(f"[mockapi]   Basic Auth:   {BASIC_USER} / {BASIC_PASSWORD}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

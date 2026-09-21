@@ -41,7 +41,16 @@ services:
       # Beschleunigt initdb; fuer eine Dev-Datenbank unproblematisch.
       POSTGRES_INITDB_ARGS: "--data-checksums"
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # An 127.0.0.1 gebunden, nicht an alle Schnittstellen.
+      #
+      # Docker veroeffentlicht Ports ohne Praefix auf 0.0.0.0 - die
+      # Datenbank waere dann im gesamten Netz erreichbar, etwa im
+      # Kundennetz oder im Hotel-WLAN. Mit dem Praefix bleibt der
+      # Zugriff vom eigenen Rechner moeglich, von aussen nicht.
+      #
+      # Gilt fuer alle Dienste hier; die Umgebung ist ausschliesslich
+      # fuer die lokale Entwicklung gedacht.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # Named Volume statt Bind-Mount: unter Windows deutlich schneller
       # als ein NTFS-Mount ueber gRPC-FUSE.
@@ -120,6 +129,20 @@ services:
       # --add-exports ist laut Installation Guide (S.6) fuer JDK 17+
       # zwingend; ohne --add-opens scheitern Teile von Hibernate/Spring
       # unter Java 21 am staerkeren Modulschutz.
+      # HINWEIS: In einem YAML-Faltblock (>-) gibt es KEINE Kommentare -
+      # eine #-Zeile darin wuerde Teil des Wertes und landet als
+      # Argument bei der JVM. Erlaeuterungen gehoeren deshalb hierher.
+      #
+      # Nicht gesetzt ist com.sun.jndi.ldap.connect.pool.protocol: Der
+      # Wert waere "plain ssl" - mit Leerzeichen, und das laesst sich
+      # im Faltblock nicht uebergeben. Ohne Anfuehrungszeichen wird
+      # "ssl" ein eigenes Argument (Java: "Could not find or load main
+      # class ssl"), mit Anfuehrungszeichen landen diese als Literale
+      # im Wert. Beides verhindert den Start.
+      #
+      # Die Option steuert nur das Pooling fuer LDAPS-Verbindungen und
+      # ist in einer Dev-Umgebung entbehrlich. Wer sie braucht, setzt
+      # sie ueber JAVA_TOOL_OPTIONS im environment-Block.
       CATALINA_OPTS: >-
         -Xms1g
         -Xmx${IIQ_HEAP:-4g}
@@ -131,9 +154,9 @@ services:
         --add-opens=java.base/java.util=ALL-UNNAMED
         --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
         -Dcom.sun.jndi.ldap.connect.pool.timeout=3000
-        -Dcom.sun.jndi.ldap.connect.pool.protocol=plain ssl
+        ${IIQ_EXTRA_OPTS:-}
     ports:
-      - "${IIQ_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${IIQ_HTTP_PORT:-8080}:8080"
     volumes:
       - ./data/objects:/data/objects:ro
       - ./data/plugins:/data/plugins:ro
@@ -171,7 +194,7 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: "1"
       MP_MAX_MESSAGES: "500"
     ports:
-      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 15s
@@ -205,10 +228,20 @@ services:
       LDAP_SKIP_DEFAULT_TREE: "yes"
       LDAP_CUSTOM_LDIF_DIR: /ldifs
     ports:
-      - "${LDAP_PORT:-1389}:1389"
+      - "127.0.0.1:${LDAP_PORT:-1389}:1389"
     volumes:
       - ./docker/openldap/ldif:/ldifs:ro
       - ldapdata:/bitnami/openldap
+    # Beim ersten Start laedt das Image zusaetzlich die LDIFs ein. Ohne
+    # diesen Healthcheck gilt der Container schon als bereit, waehrend
+    # das Verzeichnis noch leer ist - ldap-ui zeigt dann einen leeren
+    # Baum, und eine Aggregation liefe ins Nichts.
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:1389 -b '${LDAP_ROOT:-dc=example,dc=com}' -s base >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
     networks: [iiq-net]
 
@@ -235,9 +268,12 @@ services:
     container_name: iiq-mockapi
     environment:
       API_TOKEN: ${MOCKAPI_TOKEN:-mocktoken}
+      # Basic Auth als Alternative - der Connector beherrscht beides.
+      BASIC_USER: ${MOCKAPI_USER:-iiq}
+      BASIC_PASSWORD: ${MOCKAPI_PASSWORD:-iiqpassword}
       SEED_COUNT: "4"
     ports:
-      - "${MOCKAPI_PORT:-8200}:8000"
+      - "127.0.0.1:${MOCKAPI_PORT:-8200}:8000"
     volumes:
       - ./data/hr:/data/hr:ro
     restart: unless-stopped
@@ -263,14 +299,23 @@ services:
   # SCIM-2.0-Connectors.
   # -------------------------------------------------------------------------
   scim:
-    image: harrykodden/scim:latest
+    # Auf den Digest gepinnt: Das Image bietet keine Versions-Tags,
+    # und "latest" wuerde sich bei einem Upstream-Push still
+    # aendern - alle anderen Images hier sind ebenfalls gepinnt.
+    image: harrykodden/scim@sha256:e75540ee0ddd4908c572bd9149331d077d472b3cd91f1773806f2b38fd788a10
     platform: linux/amd64
     container_name: iiq-scim
     environment:
       API_KEY: ${SCIM_API_KEY:-secret}
       LOGLEVEL: INFO
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ServiceProviderConfig', timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     ports:
-      - "${SCIM_PORT:-8100}:8000"
+      - "127.0.0.1:${SCIM_PORT:-8100}:8000"
     restart: unless-stopped
     networks: [iiq-net]
 
@@ -304,9 +349,10 @@ services:
       # Passwoerter werden beim Anlegen/Aendern mit SSHA gehasht.
       PASSWD_HASH: SSHA
     ports:
-      - "${LDAP_UI_PORT:-5080}:5000"
+      - "127.0.0.1:${LDAP_UI_PORT:-5080}:5000"
     depends_on:
-      - openldap
+      openldap:
+        condition: service_healthy
     restart: unless-stopped
     networks: [iiq-net]
 
@@ -370,7 +416,7 @@ services:
       DATABASE_target: targetdb
       ENGINE_target: postgres@dbgate-plugin-postgres
     ports:
-      - "${DBGATE_PORT:-5050}:3000"
+      - "127.0.0.1:${DBGATE_PORT:-5050}:3000"
     volumes:
       - dbgatedata:/root/.dbgate
     depends_on:

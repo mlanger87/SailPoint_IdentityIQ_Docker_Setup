@@ -84,7 +84,24 @@ iiq_console_checked() {
 
     echo "${out}"
 
-    if echo "${out}" | grep -qE 'Exception|FileNotFoundException|^Error:|Unable to |Caused by:'; then
+    # Die Muster sind bewusst eng gefasst.
+    #
+    # Ein zu breites Muster ist hier gefaehrlich: Bei einem Treffer
+    # liefert diese Funktion 1, der Init-Container endet wegen "set -e"
+    # mit Fehler, und "iiq" startet wegen
+    # "condition: service_completed_successfully" gar nicht erst. Ein
+    # False Positive blockiert also den gesamten Stack.
+    #
+    # Deshalb NICHT auf blosses "Exception" oder "Unable to" pruefen:
+    # Beides kommt in harmlosen Meldungen vor (etwa "Unable to find
+    # localized message for key ..."). Stattdessen auf Muster, die einen
+    # echten Abbruch anzeigen:
+    #
+    #   ^Error:              Fehlermeldung der Konsole am Zeilenanfang
+    #   ^Caused by:          Ursachenkette einer Ausnahme
+    #   ^\s*at sailpoint\.   Stacktrace-Zeile aus IIQ-Code
+    #   java...Exception     voll qualifizierter Ausnahmename
+    if echo "${out}" | grep -qE '^Error:|^Caused by:|^[[:space:]]*at sailpoint\.|(java|javax|org|sailpoint|bsh)\.[A-Za-z.]*(Exception|Error)'; then
         log "FEHLER bei: ${label}"
         log "Die Ausgabe enthaelt eine Fehlermeldung (siehe oben)."
         return 1
@@ -234,11 +251,11 @@ EOF
         # SERI und Accelerator Pack, falls im Paket enthalten.
         if [ -d "${SPHOME}/WEB-INF/config/seri" ]; then
             log "SERI erkannt - importiere init-seri.xml."
-            echo "import seri/init-seri.xml" | iiq_console
+            echo "import seri/init-seri.xml" | iiq_console_checked "SERI-Import"
         fi
         if [ -f "${SPHOME}/WEB-INF/config/init-acceleratorpack.xml" ]; then
             log "Accelerator Pack erkannt - importiere init-acceleratorpack.xml."
-            echo "import init-acceleratorpack.xml" | iiq_console
+            echo "import init-acceleratorpack.xml" | iiq_console_checked "Accelerator-Pack"
         fi
     fi
 
