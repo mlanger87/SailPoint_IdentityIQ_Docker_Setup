@@ -1,0 +1,20 @@
+# ===========================================================================
+# Build-Kontext klein halten.
+#
+# Ohne diese Datei wuerde Docker den gesamten Projektordner an den Daemon
+# senden - inklusive der Referenzprojekte und des .git-Verzeichnisses.
+# Das Installationspaket (770 MB) wird bewusst NICHT ausgeschlossen, da
+# die Dockerfiles es brauchen.
+# ===========================================================================
+
+# Alles ausschliessen ...
+*
+
+# ... und gezielt wieder hereinnehmen, was die Builds benoetigen.
+!docker/
+!installer/*.zip
+!installer/*.jar
+!data/
+
+# Innerhalb der erlaubten Pfade aufraeumen
+data/logs/

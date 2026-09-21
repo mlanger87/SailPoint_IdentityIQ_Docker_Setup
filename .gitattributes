@@ -1,0 +1,37 @@
+# ---------------------------------------------------------------------------
+# WICHTIG: Shell-Skripte MUESSEN LF-Zeilenenden behalten.
+#
+# Der Host ist Windows. Mit core.autocrlf=true wuerde Git beim Auschecken
+# CRLF schreiben. Ein Shell-Skript mit CRLF-Shebang scheitert im Linux-
+# Container mit "bad interpreter: No such file or directory".
+#
+# Das hat in den Referenzprojekten gefehlt bzw. war unvollstaendig
+# (Projekt B sichert nur *.sh ab, nicht das extension-lose "console").
+# ---------------------------------------------------------------------------
+* text=auto eol=lf
+
+*.sh            text eol=lf
+entrypoint      text eol=lf
+healthcheck     text eol=lf
+console         text eol=lf
+Dockerfile      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.properties    text eol=lf
+*.tmpl          text eol=lf
+*.sql           text eol=lf
+*.ldif          text eol=lf
+
+# Windows-Skripte behalten CRLF
+*.ps1           text eol=crlf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Binaerdateien nicht anfassen
+*.zip           binary
+*.jar           binary
+*.war           binary
+*.png           binary
+*.jpg           binary
+*.pdf           binary
+*.dat           binary

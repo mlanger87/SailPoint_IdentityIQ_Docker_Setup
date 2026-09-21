@@ -1,0 +1,38 @@
+# ===========================================================================
+# Testgruppen
+# ---------------------------------------------------------------------------
+# groupOfNames fuer Entitlement-Aggregation und Rollenmodellierung.
+# ===========================================================================
+
+dn: cn=iiq-users,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+objectClass: top
+cn: iiq-users
+description: Alle Anwenderinnen und Anwender
+member: uid=mmustermann,ou=people,dc=example,dc=com
+member: uid=emusterfrau,ou=people,dc=example,dc=com
+member: uid=jschmidt,ou=people,dc=example,dc=com
+member: uid=tbecker,ou=people,dc=example,dc=com
+
+dn: cn=iiq-admins,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+objectClass: top
+cn: iiq-admins
+description: Administrative Berechtigung
+member: uid=jschmidt,ou=people,dc=example,dc=com
+
+dn: cn=vertrieb,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+objectClass: top
+cn: vertrieb
+description: Abteilung Vertrieb
+member: uid=mmustermann,ou=people,dc=example,dc=com
+member: uid=emusterfrau,ou=people,dc=example,dc=com
+
+dn: cn=it,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+objectClass: top
+cn: it
+description: Abteilung IT
+member: uid=jschmidt,ou=people,dc=example,dc=com
+member: uid=tbecker,ou=people,dc=example,dc=com

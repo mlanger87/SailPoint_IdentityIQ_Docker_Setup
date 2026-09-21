@@ -1,0 +1,45 @@
+# ===========================================================================
+# Entwicklungs-Overrides
+# ---------------------------------------------------------------------------
+# Diese Datei wird von "docker compose" AUTOMATISCH zusaetzlich gelesen.
+# Sie enthaelt Einstellungen, die man produktiv nicht haben will:
+#
+#   - Java-Debugger-Port (JDWP) fuer Remote-Debugging aus der IDE
+#   - IIQ-Debug-Seiten
+#   - Log-Verzeichnis als Bind-Mount, damit man Logs direkt im Editor
+#     oeffnen kann
+#
+# Soll ohne diese Overrides gestartet werden:
+#     docker compose -f docker-compose.yml up -d
+# ===========================================================================
+
+services:
+
+  iiq:
+    environment:
+      # Die Variable wird vom Tomcat-Startskript ausgewertet und an die
+      # JVM durchgereicht. suspend=n: Tomcat wartet NICHT auf den
+      # Debugger, startet also auch ohne angehaengte IDE normal.
+      JPDA_ADDRESS: "0.0.0.0:8000"
+      JPDA_TRANSPORT: "dt_socket"
+      CATALINA_OPTS: >-
+        -Xms1g
+        -Xmx${IIQ_HEAP:-4g}
+        -XX:+UseG1GC
+        -Djava.awt.headless=true
+        -Diiq.hostname=${IIQ_NODE:-iiq-dev}
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+        --add-opens=java.base/java.util=ALL-UNNAMED
+        --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
+        -Dcom.sun.jndi.ldap.connect.pool.timeout=3000
+        -Dsailpoint.debugPages=true
+    ports:
+      - "${IIQ_DEBUG_PORT:-8000}:8000"
+    # "jpda run" aktiviert den Debug-Agenten.
+    command: ["catalina.sh", "jpda", "run"]
+    volumes:
+      - ./data/objects:/data/objects:ro
+      - ./data/plugins:/data/plugins:ro
+      - ./data/certs:/data/certs:ro
+      - ./data/logs:/usr/local/tomcat/logs

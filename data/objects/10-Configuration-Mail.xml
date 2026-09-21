@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Mailversand auf den Mailpit-Container umlenken.
+
+  Bewusst als ImportAction name='merge': dabei werden nur die hier
+  genannten Schluessel geaendert, der Rest der SystemConfiguration bleibt
+  unangetastet. Ein vollstaendiges Ueberschreiben wuerde bei jedem
+  IIQ-Upgrade Aerger machen.
+
+  Referenzprojekt A loest das per "sed" auf der init.xml - das ist
+  destruktiv und ueberlebt kein Upgrade.
+
+  Mailpit-Oberflaeche: http://localhost:8025
+  ===========================================================================
+-->
+<sailpoint>
+
+  <ImportAction name='merge'>
+    <Configuration name="SystemConfiguration">
+      <Attributes>
+        <Map>
+          <entry key="defaultEmailHost" value="mailpit"/>
+          <entry key="defaultEmailPort" value="1025"/>
+          <entry key="defaultEmailFromAddress" value="identityiq@example.com"/>
+          <entry key="emailNotifierType" value="smtp"/>
+
+          <!-- Keine Authentifizierung, kein TLS - Mailpit nimmt alles an. -->
+          <entry key="smtpUser" value=""/>
+          <entry key="smtpPassword" value=""/>
+          <entry key="emailSSLEnabled" value="false"/>
+          <entry key="emailTLSEnabled" value="false"/>
+
+          <!--
+            In einer Entwicklungsumgebung sollen Mails tatsaechlich
+            verschickt werden (an Mailpit), nicht stillschweigend
+            verworfen werden.
+          -->
+          <entry key="emailRedirectAddress" value=""/>
+        </Map>
+      </Attributes>
+    </Configuration>
+  </ImportAction>
+
+</sailpoint>

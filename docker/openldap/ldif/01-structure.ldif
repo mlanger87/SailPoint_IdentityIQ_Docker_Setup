@@ -1,0 +1,24 @@
+# ===========================================================================
+# Grundstruktur des Testverzeichnisses
+# ---------------------------------------------------------------------------
+# Basis-DN: dc=example,dc=com
+#
+# Wird beim ersten Start von bitnami/openldap eingelesen
+# (LDAP_CUSTOM_LDIF_DIR=/ldifs). Die Dateien werden alphabetisch
+# verarbeitet, daher die Nummernpraefixe.
+# ===========================================================================
+
+dn: dc=example,dc=com
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: Example Organisation
+dc: example
+
+dn: ou=people,dc=example,dc=com
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: groups

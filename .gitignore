@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# SailPoint-Installationspakete (lizenzpflichtig - NIEMALS committen!)
+# ---------------------------------------------------------------------------
+installer/*.zip
+installer/*.jar
+installer/*.war
+*.war
+SailPoint_identityiq-*.zip
+
+# ---------------------------------------------------------------------------
+# Lokale Konfiguration mit Passwoertern
+# ---------------------------------------------------------------------------
+.env
+.env.local
+
+# ---------------------------------------------------------------------------
+# Laufzeit-Artefakte
+# ---------------------------------------------------------------------------
+# Logs: Inhalt ignorieren, das Verzeichnis selbst aber versionieren -
+# docker-compose.override.yml mountet es hinein.
+data/logs/*
+!data/logs/.gitkeep
+
+data/plugins/*.zip
+data/certs/*.cer
+data/certs/*.crt
+data/certs/*.pem
+
+# IIQ-Keystore (falls site-spezifische Schluessel erzeugt werden)
+secrets/
+*.dat
+*.cfg
+!**/config/**/*.cfg
+
+# ---------------------------------------------------------------------------
+# Referenzprojekte (nur lokale Analyse, gehoeren nicht ins Repo)
+# ---------------------------------------------------------------------------
+Other SailPoint IdentityIQ Docker Projekts als Reference/
+
+# ---------------------------------------------------------------------------
+# Betriebssystem / Editor
+# ---------------------------------------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/

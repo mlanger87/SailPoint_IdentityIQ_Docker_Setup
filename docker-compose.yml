@@ -1,0 +1,222 @@
+# ===========================================================================
+# SailPoint IdentityIQ 8.5 - lokale Entwicklungsumgebung
+# ---------------------------------------------------------------------------
+# Start:   docker compose up -d
+# Status:  docker compose ps
+# Logs:    docker compose logs -f iiq
+# Reset:   docker compose down -v
+#
+# Kein "version:"-Schluessel - der ist in der Compose-Spezifikation
+# veraltet und erzeugt bei aktuellen Versionen eine Warnung.
+# ===========================================================================
+
+name: iiq85
+
+services:
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL 17
+  #
+  # Das Schema wird beim allerersten Start ueber die von SailPoint
+  # ausgelieferte DDL angelegt (siehe docker/postgres/Dockerfile).
+  # Wichtig: POSTGRES_DB wird bewusst NICHT gesetzt - die DDL legt alle
+  # drei Datenbanken selbst an.
+  # -------------------------------------------------------------------------
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+      args:
+        IIQ_VERSION: ${IIQ_VERSION:-8.5}
+        IIQ_DB_USER: ${IIQ_DB_USER:-identityiq}
+        IIQ_DB_PASSWORD: ${IIQ_DB_PASSWORD:-identityiq}
+        IIQ_PLUGIN_DB_USER: ${IIQ_PLUGIN_DB_USER:-identityiqPlugin}
+        IIQ_PLUGIN_DB_PASSWORD: ${IIQ_PLUGIN_DB_PASSWORD:-identityiqPlugin}
+        IIQ_AH_DB_USER: ${IIQ_AH_DB_USER:-identityiqah}
+        IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
+    image: iiq-postgres:${IIQ_VERSION:-8.5}
+    container_name: iiq-postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Beschleunigt initdb; fuer eine Dev-Datenbank unproblematisch.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Named Volume statt Bind-Mount: unter Windows deutlich schneller
+      # als ein NTFS-Mount ueber gRPC-FUSE.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d identityiq"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # Die Schema-DDL hat 9.146 Zeilen und legt 250+ Tabellen an.
+      start_period: 120s
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
+  # Init-Container
+  #
+  # Laeuft einmal durch und beendet sich. Erst danach startet der
+  # eigentliche IIQ-Dienst (depends_on: service_completed_successfully).
+  # Der Import ist idempotent - ein erneuter Lauf erkennt am
+  # Datenbankzustand, dass bereits initialisiert wurde.
+  # -------------------------------------------------------------------------
+  iiq-init:
+    build: &iiq-build
+      context: .
+      dockerfile: docker/iiq/Dockerfile
+      args:
+        IIQ_VERSION: ${IIQ_VERSION:-8.5}
+        IIQ_PATCH: ${IIQ_PATCH:-}
+        DB_HOST: postgres
+        DB_PORT: "5432"
+        IIQ_DB_USER: ${IIQ_DB_USER:-identityiq}
+        IIQ_DB_PASSWORD: ${IIQ_DB_PASSWORD:-identityiq}
+        IIQ_PLUGIN_DB_USER: ${IIQ_PLUGIN_DB_USER:-identityiqPlugin}
+        IIQ_PLUGIN_DB_PASSWORD: ${IIQ_PLUGIN_DB_PASSWORD:-identityiqPlugin}
+        IIQ_AH_DB_USER: ${IIQ_AH_DB_USER:-identityiqah}
+        IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
+    image: iiq-app:${IIQ_VERSION:-8.5}
+    container_name: iiq-init
+    environment:
+      INIT: "y"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    volumes:
+      - ./data/objects:/data/objects:ro
+      - ./data/plugins:/data/plugins:ro
+      - ./data/certs:/data/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Im Init-Container laeuft kein Tomcat - der aus dem Image geerbte
+    # HTTP-Healthcheck wuerde den Container dauerhaft als "unhealthy"
+    # markieren.
+    healthcheck:
+      disable: true
+    restart: "no"
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
+  # IdentityIQ auf Tomcat 9 / OpenJDK 21
+  # -------------------------------------------------------------------------
+  iiq:
+    build: *iiq-build
+    image: iiq-app:${IIQ_VERSION:-8.5}
+    container_name: iiq
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      # Diese Flags MUESSEN hier stehen: das Startskript WEB-INF/bin/iiq
+      # setzt sie ab Java 17 zwar selbst, Tomcat erbt davon aber nichts.
+      # --add-exports ist laut Installation Guide (S.6) fuer JDK 17+
+      # zwingend; ohne --add-opens scheitern Teile von Hibernate/Spring
+      # unter Java 21 am staerkeren Modulschutz.
+      CATALINA_OPTS: >-
+        -Xms1g
+        -Xmx${IIQ_HEAP:-4g}
+        -XX:+UseG1GC
+        -Djava.awt.headless=true
+        -Diiq.hostname=${IIQ_NODE:-iiq-dev}
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+        --add-opens=java.base/java.util=ALL-UNNAMED
+        --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
+        -Dcom.sun.jndi.ldap.connect.pool.timeout=3000
+        -Dcom.sun.jndi.ldap.connect.pool.protocol=plain ssl
+    ports:
+      - "${IIQ_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./data/objects:/data/objects:ro
+      - ./data/plugins:/data/plugins:ro
+      - ./data/certs:/data/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      iiq-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
+  # Mailpit - faengt alle von IIQ versendeten Mails ab
+  #
+  # SMTP laeuft nur containerintern auf 1025; nach aussen ist nur die
+  # Weboberflaeche sichtbar. Damit gibt es keinen Konflikt mit Port 25
+  # auf dem Windows-Host.
+  # -------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: iiq-mailpit
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_MAX_MESSAGES: "500"
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
+  # OpenLDAP - Testverzeichnis fuer Aggregation und Provisionierung
+  #
+  # bitnami/openldap statt osixia/openldap: letzteres wird seit Jahren
+  # nicht mehr gepflegt, wird aber von drei der vier Referenzprojekte
+  # verwendet.
+  # -------------------------------------------------------------------------
+  openldap:
+    image: bitnami/openldap:2.6
+    container_name: iiq-openldap
+    environment:
+      LDAP_ROOT: ${LDAP_ROOT:-dc=example,dc=com}
+      LDAP_ADMIN_USERNAME: ${LDAP_ADMIN_USER:-admin}
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-adminpassword}
+      LDAP_SKIP_DEFAULT_TREE: "yes"
+      LDAP_CUSTOM_LDIF_DIR: /ldifs
+    ports:
+      - "${LDAP_PORT:-1389}:1389"
+    volumes:
+      - ./docker/openldap/ldif:/ldifs:ro
+      - ldapdata:/bitnami/openldap
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
+  # pgAdmin - Blick in die IIQ-Datenbank
+  # -------------------------------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:8.14
+    container_name: iiq-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      # Kein Master-Passwort-Dialog bei jedem Start.
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - pgadmindata:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [iiq-net]
+
+networks:
+  iiq-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  ldapdata:
+  pgadmindata:

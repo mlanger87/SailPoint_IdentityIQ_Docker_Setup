@@ -1,0 +1,72 @@
+# ===========================================================================
+# Testbenutzer
+# ---------------------------------------------------------------------------
+# Passwort aller Konten: "password"
+# (userPassword ist base64-kodiert: cGFzc3dvcmQ= )
+#
+# Die Attribute sind so gewaehlt, dass sich damit eine Korrelation gegen
+# IdentityIQ-Identitaeten ueben laesst (employeeNumber als eindeutiger
+# Schluessel, manager fuer die Hierarchie).
+# ===========================================================================
+
+dn: uid=mmustermann,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: mmustermann
+cn: Max Mustermann
+sn: Mustermann
+givenName: Max
+mail: max.mustermann@example.com
+employeeNumber: 1001
+title: Sachbearbeiter
+departmentNumber: Vertrieb
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=emusterfrau,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: emusterfrau
+cn: Erika Musterfrau
+sn: Musterfrau
+givenName: Erika
+mail: erika.musterfrau@example.com
+employeeNumber: 1002
+title: Teamleitung
+departmentNumber: Vertrieb
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=jschmidt,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: jschmidt
+cn: Jana Schmidt
+sn: Schmidt
+givenName: Jana
+mail: jana.schmidt@example.com
+employeeNumber: 1003
+title: Administratorin
+departmentNumber: IT
+manager: uid=emusterfrau,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=tbecker,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: tbecker
+cn: Tom Becker
+sn: Becker
+givenName: Tom
+mail: tom.becker@example.com
+employeeNumber: 1004
+title: Entwickler
+departmentNumber: IT
+manager: uid=emusterfrau,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
