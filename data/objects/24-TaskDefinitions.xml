@@ -1,0 +1,221 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Aufgaben fuer Aggregation und Auswertung
+  ===========================================================================
+  Die Aufgaben werden nur ANGELEGT, nicht ausgefuehrt. Gestartet werden
+  sie in der Oberflaeche unter Setup > Tasks.
+
+  Sinnvolle Reihenfolge beim ersten Lauf:
+
+    1. "HR Aggregation"          erzeugt die Identitaeten aus der CSV
+    2. "LDAP Group Aggregation"  laedt die Gruppen als Entitlements
+    3. "LDAP Account Aggregation" korreliert die Seed-Accounts
+    4. "JDBC Aggregation"        korreliert die Accounts des
+                                 zweiten Zielsystems
+    5. "Refresh Identity Cube"   wertet Rollen aus und baut die
+                                 Manager-Hierarchie auf
+
+  Die Gruppen VOR den Accounts zu laden ist kein Zufall: sonst verweisen
+  die Entitlements der Accounts auf noch unbekannte Gruppen und erhalten
+  keinen Anzeigenamen.
+
+  Start aus der Konsole statt aus der Oberflaeche:
+      run "LDAP Group Aggregation"
+  Die Anfuehrungszeichen sind Pflicht - ohne sie trennt die Konsole am
+  Leerzeichen und sucht nach einer Aufgabe namens "LDAP", was mehrdeutig
+  ist ("Ambiguous objects").
+  ===========================================================================
+-->
+<sailpoint>
+
+  <!-- ===================================================================
+       1. HR-Aggregation - erzeugt die Identitaeten
+       =================================================================== -->
+  <TaskDefinition name="HR Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  template="true"
+                  type="AccountAggregation">
+    <Description>Liest die autoritative HR-CSV und erzeugt daraus die Identitaeten.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="HR-Application"/>
+        <!--
+          Pflicht bei einer autoritativen Quelle: erst damit legt IIQ
+          fuer eine unbekannte Personalnummer eine neue Identitaet an.
+        -->
+        <entry key="checkDeleted">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="promoteAttributes">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+  <!-- ===================================================================
+       2. LDAP-Gruppenaggregation - laedt die Entitlements
+       =================================================================== -->
+  <TaskDefinition name="LDAP Group Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="String"
+                  resultAction="Delete"
+                  subType="task_item_type_acct_grp_aggregation"
+                  template="true"
+                  type="AccountGroupAggregation">
+    <Description>Laedt die LDAP-Gruppen als Entitlements. Vor der Account-Aggregation ausfuehren.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="LDAP-Target"/>
+        <!--
+          Entscheidend: derselbe Executor wie bei der
+          Account-Aggregation, unterschieden wird ueber aggregationType.
+          Die in aelteren Beispielen genannte Klasse
+          sailpoint.task.AccountGroupScan gibt es in 8.5 nicht mehr -
+          die Aufgabe endet dann mit "Error" und als einzige Meldung
+          dem Klassennamen.
+        -->
+        <entry key="aggregationType" value="group"/>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+  <!-- ===================================================================
+       3. LDAP-Accountaggregation - korreliert die Seed-Accounts
+       =================================================================== -->
+  <TaskDefinition name="LDAP Account Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  template="true"
+                  type="AccountAggregation">
+    <Description>Liest die LDAP-Accounts und korreliert sie ueber employeeNumber an die HR-Identitaeten.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="LDAP-Target"/>
+        <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <!--
+          Bewusst NICHT gesetzt: promoteAttributes. Das Zielsystem ist
+          nicht autoritativ, seine Attribute sollen die HR-Werte auf der
+          Identitaet nicht ueberschreiben.
+        -->
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+  <!-- ===================================================================
+       4. Identity Refresh - Rollen und Hierarchie
+       =================================================================== -->
+  <TaskDefinition name="Refresh Identity Cube"
+                  executor="sailpoint.task.IdentityRefreshExecutor"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  template="true"
+                  type="Identity">
+    <Description>Wertet Rollenzuweisungen aus, baut die Manager-Hierarchie auf und aktualisiert die Identitaeten.</Description>
+    <Attributes>
+      <Map>
+        <entry key="refreshIdentityEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <!-- Wertet die Zuweisungsregeln der Bundles aus. -->
+        <entry key="promoteAttributes">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="refreshAssignedRoles">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="refreshManagerStatus">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <!--
+          Provisioniert, was sich aus den Rollen ergibt. Damit legt ein
+          Refresh nach einer Rollenzuweisung den LDAP-Account an.
+        -->
+        <entry key="provision">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <!--
+          Verarbeitet die Lifecycle-Events (Joiner, Leaver). Ohne diesen
+          Schalter werden die Trigger zwar ausgewertet, aber kein
+          Workflow gestartet - die Ereignisse verpuffen dann still.
+        -->
+        <entry key="processTriggers">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+  <!-- ===================================================================
+       5. JDBC-Aggregation - zweites Zielsystem
+       =================================================================== -->
+  <TaskDefinition name="JDBC Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  template="true"
+                  type="AccountAggregation">
+    <Description>Liest die Accounts aus der Zieldatenbank targetdb und korreliert sie ueber IIQID.</Description>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="JDBC-Target"/>
+        <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+</sailpoint>

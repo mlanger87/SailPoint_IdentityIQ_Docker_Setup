@@ -25,3 +25,21 @@ ou: people
 dn: ou=groups,dc=example,dc=com
 objectClass: organizationalUnit
 ou: groups
+
+# ---------------------------------------------------------------------------
+# Platzhalter fuer leere Gruppen
+#
+# Die objectClass groupOfNames verlangt laut RFC 4519 mindestens ein
+# member; eine mitgliederlose Gruppe ist schema-widrig und wird von slapd
+# abgelehnt. Da dieses Verzeichnis Zielsystem ist, sind aber viele Gruppen
+# zunaechst leer und warten darauf, dass IdentityIQ Accounts hineinlegt.
+#
+# Dieser Eintrag dient solchen Gruppen als einziges member. Er liegt
+# bewusst NICHT unter ou=people, damit er nicht in den Bereich der
+# Account-Aggregation faellt (searchDN: ou=people).
+# ---------------------------------------------------------------------------
+dn: cn=placeholder,dc=example,dc=com
+objectClass: applicationProcess
+objectClass: top
+cn: placeholder
+description: Platzhalter fuer leere Gruppen - kein echter Account

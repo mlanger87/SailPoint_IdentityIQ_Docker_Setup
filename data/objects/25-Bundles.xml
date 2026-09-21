@@ -1,0 +1,202 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Rollenmodell
+  ===========================================================================
+  Aufgebaut nach dem ueblichen zweistufigen Muster:
+
+    Business-Rolle (organization)  - beschreibt eine Funktion im
+                                     Unternehmen, wird automatisch
+                                     zugewiesen
+        erfordert
+    IT-Rolle (it)                  - buendelt konkrete Berechtigungen
+                                     eines Zielsystems
+
+  Warum zweistufig und nicht Entitlements direkt an der Business-Rolle:
+  Die Business-Rolle bleibt so unabhaengig vom Zielsystem. Kommt spaeter
+  ein zweites System hinzu, wird eine weitere IT-Rolle ergaenzt, ohne
+  dass die fachliche Beschreibung angefasst werden muss.
+
+  Die Zuweisung erfolgt ueber "selector" - ein Filter auf Attribute der
+  Identitaet, die aus der HR-CSV stammen. Der Task "Refresh Identity
+  Cube" wertet diese Regeln aus.
+
+  Ein Hinweis zur Wirkung: Mit provision=true im Refresh-Task legt IIQ
+  den LDAP-Account an, sobald eine Rolle zugewiesen wird und der
+  Mitarbeitende noch keinen Account hat. Genau das ist der Joiner-Fall.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <!-- ===================================================================
+       IT-Rollen - buendeln die LDAP-Gruppen
+       =================================================================== -->
+
+  <Bundle displayName="LDAP Basic Access" name="ldap-basic-access" type="it">
+    <Description>Grundberechtigungen, die jede Person im Unternehmen erhaelt.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="LDAP-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="groups">
+            <Value>
+              <List>
+                <String>cn=org-all-staff,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-licence-office,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-timesheet,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-wiki-read,ou=groups,dc=example,dc=com</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <Bundle displayName="LDAP IT Access" name="ldap-it-access" type="it">
+    <Description>Zusaetzliche Berechtigungen fuer die IT-Abteilung.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="LDAP-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="groups">
+            <Value>
+              <List>
+                <String>cn=dept-it,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-source-control,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-ticketing,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-vpn,ou=groups,dc=example,dc=com</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <Bundle displayName="LDAP Sales Access" name="ldap-sales-access" type="it">
+    <Description>Zusaetzliche Berechtigungen fuer den Vertrieb.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="LDAP-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="groups">
+            <Value>
+              <List>
+                <String>cn=dept-sales,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-crm-read,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-crm-write,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-customer-portal,ou=groups,dc=example,dc=com</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <Bundle displayName="LDAP Manager Access" name="ldap-manager-access" type="it">
+    <Description>Berechtigungen fuer Fuehrungskraefte.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="LDAP-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="groups">
+            <Value>
+              <List>
+                <String>cn=org-managers,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-expenses,ou=groups,dc=example,dc=com</String>
+                <String>cn=app-training-portal,ou=groups,dc=example,dc=com</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <!-- ===================================================================
+       Business-Rollen - werden automatisch zugewiesen
+       =================================================================== -->
+
+  <Bundle displayName="Employee" name="employee" type="organization">
+    <Description>Jede aktive Person im Unternehmen. Traegt die Grundberechtigungen.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <!--
+      Zuweisungsregel: alle mit HR-Status "active". Das Attribut stammt
+      aus der CSV-Spalte status und ist in 23-ObjectConfig-Identity.xml
+      als searchable definiert - sonst wuerde dieser Filter nicht
+      funktionieren.
+    -->
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression>
+          <MatchTerm name="hrStatus" value="active"/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="ldap-basic-access"/>
+    </Requirements>
+  </Bundle>
+
+  <Bundle displayName="IT Staff" name="it-staff" type="organization">
+    <Description>Mitarbeitende der IT-Abteilung.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression>
+          <MatchTerm name="department" value="IT"/>
+          <MatchTerm name="hrStatus" value="active"/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="ldap-it-access"/>
+    </Requirements>
+  </Bundle>
+
+  <Bundle displayName="Sales Staff" name="sales-staff" type="organization">
+    <Description>Mitarbeitende im Vertrieb.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression>
+          <MatchTerm name="department" value="Sales"/>
+          <MatchTerm name="hrStatus" value="active"/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="ldap-sales-access"/>
+    </Requirements>
+  </Bundle>
+
+</sailpoint>

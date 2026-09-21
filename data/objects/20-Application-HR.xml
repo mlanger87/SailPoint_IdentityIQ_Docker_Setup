@@ -1,0 +1,173 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  HR-Applikation - die autoritative Quelle
+  ===========================================================================
+  Liest data/hr/HR-people.csv ueber den DelimitedFileConnector und erzeugt
+  daraus die Identitaeten in IdentityIQ.
+
+  Der Pfad unter "file" ist der Pfad IM CONTAINER. Der Connector laedt
+  nichts hoch, sondern oeffnet eine Datei im Dateisystem; die CSV wird
+  ueber einen Bind-Mount aus data/hr/ bereitgestellt. Eine Aenderung an
+  der Datei ist damit sofort wirksam - es genuegt, die Aggregation
+  erneut zu starten.
+
+  Die Struktur folgt einem Export aus einer 8.5-Instanz. Nicht uebernommen
+  wurden:
+    - id/created-Attribute: die vergibt IIQ beim Import selbst
+    - PassphraseForPrivateKey: verschluesselt und an den Keystore der
+      Ursprungsinstanz gebunden, hier also wertlos
+    - fileEncoding="csv": das ist ein Artefakt der Oberflaeche, an dieser
+      Stelle gehoert ein Encoding hin
+
+  Der Trennzeichen-Eintrag ist ";" - passend zur erzeugten CSV.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <Application authoritative="true"
+               connector="sailpoint.connector.DelimitedFileConnector"
+               featuresString="DIRECT_PERMISSIONS, NO_RANDOM_ACCESS, DISCOVER_SCHEMA"
+               icon="enterpriseIcon"
+               name="HR-Application"
+               profileClass=""
+               type="DelimitedFile">
+
+    <Attributes>
+      <Map>
+        <entry key="file" value="/data/hr/HR-people.csv"/>
+        <entry key="delimiter" value=";"/>
+        <entry key="fileEncoding" value="UTF-8"/>
+        <entry key="filetransport" value="local"/>
+        <entry key="parseType" value="delimited"/>
+        <entry key="hasHeader">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="filterEmptyRecords">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="stopIfLineHasWrongColumnLength">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="partitionMode" value="auto"/>
+        <entry key="group.filetransport" value="local"/>
+        <entry key="group.partitionMode" value="auto"/>
+        <entry key="group.filterEmptyRecords">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+
+        <!--
+          Loest die Vorgesetztenbeziehung auf.
+
+          Zu lesen ist der Filter so: property ist die IDENTITAETS-Seite,
+          value das Attribut des ACCOUNTS. IIQ sucht also die Identitaet,
+          deren employeeNumber dem managerEmployeeNumber der Zeile
+          entspricht.
+
+          Voraussetzung: employeeNumber muss auf der Identitaet
+          durchsuchbar sein, also eine extendedNumber besitzen (siehe
+          23-ObjectConfig-Identity.xml). Fehlt sie, liegt der Wert nur im
+          XML-Blob, der Filter findet nichts - und die Hierarchie bleibt
+          still und ohne Fehlermeldung leer.
+
+          Daraus folgt eine Reihenfolge: Die ObjectConfig muss VOR dem
+          ersten Aggregationslauf importiert sein. Beim Import in einem
+          Zug ist das gegeben, weil 23- nach 20- liegt; bei einem
+          nachtraeglich ergaenzten Attribut muss die Aggregation erneut
+          laufen.
+        -->
+        <entry key="managerCorrelationFilter">
+          <value>
+            <Filter operation="EQ" property="employeeNumber" value="managerEmployeeNumber"/>
+          </value>
+        </entry>
+
+        <entry key="templateApplication" value="DelimitedFile Template"/>
+        <entry key="sysDescriptions">
+          <value>
+            <Map>
+              <entry key="en_US" value="Authoritative HR source (CSV)"/>
+            </Map>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+
+    <!--
+      Das Schema entspricht den Spalten der CSV. Die Reihenfolge ist hier
+      unerheblich, weil hasHeader=true gesetzt ist - der Connector ordnet
+      ueber die Kopfzeile zu, nicht ueber die Position.
+
+      identityAttribute=employeeNumber ist der Schluessel: er ist stabil,
+      waehrend sich Namen und Mailadressen aendern koennen.
+    -->
+    <Schemas>
+      <Schema displayAttribute="displayName"
+              identityAttribute="employeeNumber"
+              instanceAttribute=""
+              nativeObjectType="account"
+              objectType="account">
+        <AttributeDefinition name="employeeNumber" type="string">
+          <Description>Personalnummer - eindeutiger, stabiler Schluessel</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="firstName" type="string">
+          <Description>Vorname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="lastName" type="string">
+          <Description>Nachname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="displayName" type="string">
+          <Description>Anzeigename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="email" type="string">
+          <Description>Dienstliche Mailadresse</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="title" type="string">
+          <Description>Funktionsbezeichnung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="department" type="string">
+          <Description>Abteilung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="location" type="string">
+          <Description>Standort</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="costCentre" type="string">
+          <Description>Kostenstelle</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="employeeType" type="string">
+          <Description>Hierarchieebene: department-head, team-lead, staff</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="phone" type="string">
+          <Description>Telefonnummer</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="managerEmployeeNumber" type="string">
+          <Description>Personalnummer des Vorgesetzten</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="startDate" type="string">
+          <Description>Eintrittsdatum JJJJ-MM-TT - steuert den Joiner</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="endDate" type="string">
+          <Description>Austrittsdatum JJJJ-MM-TT, leer bei unbefristet - steuert den Leaver</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="status" type="string">
+          <Description>active, inactive oder future - abgeleitet aus den Datumsfeldern</Description>
+        </AttributeDefinition>
+      </Schema>
+    </Schemas>
+
+  </Application>
+
+</sailpoint>

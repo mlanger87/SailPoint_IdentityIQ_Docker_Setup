@@ -148,6 +148,66 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+step "7. Systemlandschaft: Quelle und Zielsysteme"
+# ---------------------------------------------------------------------------
+# Geprueft wird, dass die Objekte da sind und die Verbindungen stehen.
+# Ob die Aggregation schon Daten geliefert hat, haengt davon ab, ob die
+# Aufgaben gelaufen sind - das entscheidet der Anwender (Setup > Tasks).
+
+apps="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc         "SELECT string_agg(name, ',' ORDER BY name) FROM spt_application;" 2>/dev/null | tr -d '')"
+
+for erwartet in HR-Application LDAP-Target JDBC-Target; do
+    if echo "${apps}" | grep -q "${erwartet}"; then
+        ok "Applikation vorhanden: ${erwartet}"
+    else
+        fail "Applikation fehlt: ${erwartet}"
+    fi
+done
+
+# Die HR-CSV muss im Container unter genau dem Pfad liegen, der in der
+# Application steht - ein haeufiger Fehler nach Aenderungen am Mount.
+if docker compose exec -T iiq test -r /data/hr/HR-people.csv 2>/dev/null; then
+    zeilen="$(docker compose exec -T iiq sh -c 'wc -l < /data/hr/HR-people.csv' 2>/dev/null | tr -d ' ')"
+    ok "HR-CSV im Container lesbar (${zeilen} Zeilen inkl. Kopfzeile)"
+else
+    fail "HR-CSV nicht unter /data/hr/HR-people.csv erreichbar"
+    info "Mount pruefen: docker compose config | grep -A3 'data/hr'"
+fi
+
+target_accounts="$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                    'SELECT count(*) FROM targetapp."IIQData";' 2>/dev/null | tr -d ' ')"
+if [ -n "${target_accounts}" ]; then
+    target_rollen="$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                      'SELECT count(*) FROM targetapp."IIQRoles";' 2>/dev/null | tr -d ' ')"
+    ok "Zieldatenbank targetdb erreichbar (${target_accounts} Konten, ${target_rollen} Rollen)"
+else
+    fail "Zieldatenbank targetdb nicht lesbar"
+fi
+
+# Ohne die Regeln kann IIQ ins JDBC-Ziel nicht schreiben.
+regeln="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc           "SELECT count(*) FROM spt_rule WHERE name LIKE 'JDBC-Target%';" 2>/dev/null | tr -d ' ')"
+if [ "${regeln:-0}" -ge 6 ]; then
+    ok "JDBC-Provisioning-Regeln vorhanden (${regeln})"
+else
+    fail "Es fehlen JDBC-Regeln (gefunden: ${regeln:-0}, erwartet: 6)"
+fi
+
+ldap_gruppen="$(docker compose exec -T openldap ldapsearch -x -H ldap://localhost:1389                 -D "cn=admin,dc=example,dc=com" -w adminpassword                 -b "ou=groups,dc=example,dc=com" '(objectClass=groupOfNames)' dn 2>/dev/null                 | grep -c '^dn:' | tr -d ' ')"
+if [ "${ldap_gruppen:-0}" -ge 10 ]; then
+    ok "LDAP-Gruppen als Entitlements vorhanden (${ldap_gruppen})"
+else
+    fail "Zu wenige LDAP-Gruppen (${ldap_gruppen:-0})"
+    info "Bei 0: LDIF-Import abgebrochen - groupOfNames braucht mindestens ein member"
+fi
+
+# Ohne extendedNumber findet kein Filter die Attribute - dann laufen
+# Rollenzuweisung und Manager-Korrelation still ins Leere.
+erweitert="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc              "SELECT count(*) FROM spt_identity WHERE extended1 IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+if [ "${erweitert:-0}" -gt 0 ]; then
+    ok "Identitaetsattribute befuellt (${erweitert} mit employeeNumber)"
+else
+    info "Noch keine Identitaetsattribute - Aggregation noch nicht gestartet"
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n'
 if [ "${FAILED}" -eq 0 ]; then
     printf '=== Alle Pruefungen bestanden ===\n\n'

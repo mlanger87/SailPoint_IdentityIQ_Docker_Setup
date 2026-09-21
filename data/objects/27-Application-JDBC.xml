@@ -1,0 +1,292 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  JDBC-Applikation - zweites Zielsystem
+  ===========================================================================
+  Spricht die Datenbank targetdb im selben PostgreSQL-Container an. Sie
+  wird beim ersten Start von docker/postgres/03-targetdb.sql angelegt.
+
+  Warum keine eigene Datenbank-Instanz: Der PostgreSQL-JDBC-Treiber liegt
+  bereits im IIQ-Image (er wird fuer IIQ selbst gebraucht). Ein zweites
+  Datenbanksystem haette denselben Connector geprueft, aber ~1,5 GB RAM
+  gekostet.
+
+  Aufbau nach dem Muster einer produktiven Matrix42-Anbindung:
+  provisionRule="operationRule" mit fuenf Operations-Regeln und einer
+  BuildMap-Regel. Abweichungen von jener Vorlage:
+
+    - driverClass/url zeigen auf PostgreSQL statt MSSQL.
+    - Die Zugangsdaten stehen im Klartext statt als
+      %%APP_..._PASSWORD%%-Platzhalter. Jene Platzhalter werden von einer
+      SSB-Build-Pipeline ersetzt, die es hier nicht gibt; siehe CLAUDE.md
+      zur Entscheidung gegen iiq encrypt in dieser Dev-Umgebung.
+    - Kein DISCOVER_SCHEMA in featuresString: das Schema ist hier
+      vollstaendig definiert.
+
+  Das Zielsystem kennt zwei Tabellen:
+    IIQData          eine Zeile je Account
+    IIQAccountRoles  die Rollenzuweisungen (Mehrwerttabelle)
+
+  Der SELECT liest nur IIQData; die Rollen laedt die BuildMap-Regel nach.
+  Genau dafuer gibt es sie - mit einem einfachen JOIN bekaeme man eine
+  Zeile je Rolle statt je Account.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <Application connector="sailpoint.connector.JDBCConnector"
+               featuresString="PROVISIONING, SYNC_PROVISIONING, SEARCH, ENABLE, ACCOUNT_ONLY_REQUEST"
+               icon="databaseIcon"
+               name="JDBC-Target"
+               profileClass=""
+               type="JDBC">
+
+    <AccountCorrelationConfig>
+      <Reference class="sailpoint.object.CorrelationConfig"
+                 name="JDBC Correlation"/>
+    </AccountCorrelationConfig>
+
+    <Attributes>
+      <Map>
+        <entry key="driverClass" value="org.postgresql.Driver"/>
+        <entry key="url" value="jdbc:postgresql://postgres:5432/targetdb"/>
+        <entry key="user" value="targetapp"/>
+        <entry key="password" value="targetapp"/>
+
+        <!--
+          Der Aggregations-SELECT. Liest nur die Account-Tabelle; die
+          Rollen ergaenzt die BuildMap-Regel.
+        -->
+        <entry key="SQL" value="SELECT * FROM targetapp.&quot;IIQData&quot;"/>
+
+        <!--
+          Einzelabfrage fuer einen Account, etwa beim Nachlesen nach
+          einer Provisionierung. $(identity) ersetzt IIQ durch die
+          NativeIdentity.
+        -->
+        <entry key="getObjectSQL"
+               value="SELECT * FROM targetapp.&quot;IIQData&quot; WHERE &quot;IIQID&quot; = '$(identity)'"/>
+
+        <entry key="testConnSQL" value="SELECT 1"/>
+
+        <entry key="aggregationType" value="account"/>
+
+        <!-- Regeln fuer Lesen und Schreiben. -->
+        <entry key="buildMapRule" value="JDBC-Target BuildMap"/>
+        <entry key="provisionRule" value="operationRule"/>
+        <entry key="jdbcCreateProvisioningRule"  value="JDBC-Target Create"/>
+        <entry key="jdbcModifyProvisioningRule"  value="JDBC-Target Modify"/>
+        <entry key="jdbcDeleteProvisioningRule"  value="JDBC-Target Delete"/>
+        <entry key="jdbcEnableProvisioningRule"  value="JDBC-Target Enable"/>
+        <entry key="jdbcDisableProvisioningRule" value="JDBC-Target Disable"/>
+
+        <!--
+          Sammelt Fehler einzelner Zeilen, statt die ganze Aggregation
+          abzubrechen. Bei Testdaten mit gelegentlich unsauberen
+          Zeilen deutlich angenehmer.
+        -->
+        <entry key="jdbcExceptionBucketing">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+
+        <entry key="connRetryEnable">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+        <entry key="connMaxRetry" value="3"/>
+        <entry key="connWaitTimeForRetry" value="2"/>
+
+        <entry key="templateApplication" value="JDBC Template"/>
+        <entry key="sysDescriptions">
+          <value>
+            <Map>
+              <entry key="en_US" value="JDBC target system (PostgreSQL)"/>
+            </Map>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+
+    <!--
+      Create-Policy: leitet die Spaltenwerte aus der Identitaet ab.
+      Die Feldnamen entsprechen den Spalten von IIQData; die
+      Create-Regel liest sie aus dem ProvisioningPlan.
+    -->
+    <ProvisioningForms>
+      <Form name="Create Account" objectType="account" type="Create">
+        <Attributes>
+          <Map>
+            <entry key="pageTitle" value="Create Account"/>
+          </Map>
+        </Attributes>
+        <Section name="Account">
+          <Field name="IIQID" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                // Der Korrelationsschluessel. Ohne ihn liesse sich der
+                // Account bei der naechsten Aggregation nicht der
+                // Identitaet zuordnen.
+                return identity.getStringAttribute("employeeNumber");
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Account" type="string">
+            <Script>
+              <Source><![CDATA[
+                String first = identity.getFirstname();
+                String last  = identity.getLastname();
+                if (first != null && first.length() > 0 && last != null) {
+                    return (first.substring(0, 1) + last)
+                           .toLowerCase().replaceAll("[^a-z0-9]", "");
+                }
+                return identity.getName().toLowerCase();
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="FirstName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getFirstname();]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="LastName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getLastname();]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Name" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getDisplayableName();]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Email" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getEmail();]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Position" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("jobTitle");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Department" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("department");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Costcenter" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("costCentre");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Location" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("location");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="EmploymentType" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("employeeType");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="Status" type="string" value="aktiv"/>
+        </Section>
+      </Form>
+    </ProvisioningForms>
+
+    <Schemas>
+      <!--
+        IIQID ist das identityAttribute - der Wert, ueber den IIQ einen
+        Account wiedererkennt. Bewusst nicht die Spalte ID: die ist ein
+        Autowert der Datenbank und beim Anlegen noch unbekannt.
+      -->
+      <Schema displayAttribute="Name"
+              identityAttribute="IIQID"
+              instanceAttribute=""
+              nativeObjectType="account"
+              objectType="account">
+        <AttributeDefinition name="ID" type="string">
+          <Description>Technischer Schluessel der Datenbank</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="IIQID" type="string">
+          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Account" type="string">
+          <Description>Anmeldename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="FirstName" type="string">
+          <Description>Vorname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="LastName" type="string">
+          <Description>Nachname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Name" type="string">
+          <Description>Anzeigename</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Email" type="string">
+          <Description>Mailadresse</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Phone" type="string">
+          <Description>Telefonnummer</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Position" type="string">
+          <Description>Funktionsbezeichnung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Department" type="string">
+          <Description>Abteilung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Costcenter" type="string">
+          <Description>Kostenstelle</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Location" type="string">
+          <Description>Standort</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="EmploymentType" type="string">
+          <Description>Beschaeftigungsart</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="Status" type="string">
+          <Description>aktiv oder inaktiv</Description>
+        </AttributeDefinition>
+        <!--
+          Mehrwertig und als Entitlement markiert: diese Werte erscheinen
+          in IIQ als Berechtigungen und lassen sich in Rollen buendeln.
+          Sie stammen nicht aus dem SELECT, sondern aus der
+          BuildMap-Regel.
+        -->
+        <AttributeDefinition entitlement="true" managed="true" multi="true"
+                             name="roles" type="string">
+          <Description>Rollen im Zielsystem</Description>
+        </AttributeDefinition>
+      </Schema>
+    </Schemas>
+
+  </Application>
+
+  <!--
+    Korrelation ueber die Personalnummer, wie beim LDAP-Zielsystem.
+  -->
+  <CorrelationConfig name="JDBC Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="IIQID"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
+
+</sailpoint>

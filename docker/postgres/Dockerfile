@@ -91,6 +91,12 @@ COPY --from=ddl /work/extracted/01-create-identityiq.sql \
 COPY docker/postgres/02-search-path.sql \
      /docker-entrypoint-initdb.d/02-search-path.sql
 
+# Vierte Datenbank als Zielsystem fuer den JDBC-Connector. Bewusst im
+# selben Container: der PostgreSQL-JDBC-Treiber liegt bereits im
+# IIQ-Image, ein zweites Datenbanksystem haette keinen Erkenntniswert.
+COPY docker/postgres/03-targetdb.sql \
+     /docker-entrypoint-initdb.d/03-targetdb.sql
+
 # Tuning fuer IdentityIQ.
 #
 # "include_dir" laesst sich NICHT per "postgres -c" setzen (es ist nur in

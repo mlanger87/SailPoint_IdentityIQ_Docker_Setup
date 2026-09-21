@@ -1,0 +1,101 @@
+employeeNumber;firstName;lastName;displayName;email;title;department;location;costCentre;employeeType;phone;managerEmployeeNumber;startDate;endDate;status
+1001;Ursula;Davis;Ursula Davis;ursula.davis@example.com;Director;Sales;London;CC-1000;department-head;+44 20 8135 1371;;2022-01-08;;active
+1002;Ursula;Roberts;Ursula Roberts;ursula.roberts@example.com;Team Lead;Sales;London;CC-1000;team-lead;+44 20 9754 2837;1001;2022-10-15;;active
+1003;Yasmin;Harris;Yasmin Harris;yasmin.harris@example.com;Team Lead;Sales;London;CC-1000;team-lead;+44 20 6054 1523;1001;2024-08-18;;active
+1004;Alice;Davis;Alice Davis;alice.davis@example.com;Specialist;Sales;London;CC-1000;staff;+44 20 4474 8076;1002;2016-04-10;;active
+1005;Andrew;Johnson;Andrew Johnson;andrew.johnson@example.com;Administrator;Sales;London;CC-1000;staff;+44 20 7189 6127;1002;2018-12-14;;active
+1006;Beatrice;Jenkins;Beatrice Jenkins;beatrice.jenkins@example.com;Administrator;Sales;London;CC-1000;staff;+44 20 5700 9053;1003;2020-02-15;;active
+1007;Daniel;Morgan;Daniel Morgan;daniel.morgan@example.com;Officer;Sales;London;CC-1000;staff;+44 20 8398 7182;1002;2019-04-01;;active
+1008;Yasmin;Wright;Yasmin Wright;yasmin.wright@example.com;Analyst;Sales;London;CC-1000;staff;+44 20 9577 1759;1003;2020-12-14;2026-09-13;inactive
+1009;Quinn;Robinson;Quinn Robinson;quinn.robinson@example.com;Consultant;Sales;London;CC-1000;staff;+44 20 2808 9946;1002;2026-09-27;;future
+1010;Irene;Phillips;Irene Phillips;irene.phillips@example.com;Administrator;Sales;London;CC-1000;staff;+44 20 6638 6019;1002;2025-09-04;;active
+1011;Nathan;Reed;Nathan Reed;nathan.reed@example.com;Specialist;Sales;London;CC-1000;staff;+44 20 7209 6554;1002;2026-10-26;;future
+1012;Brian;Murphy;Brian Murphy;brian.murphy@example.com;Associate;Sales;London;CC-1000;staff;+44 20 2267 9241;1003;2014-07-09;;active
+1013;George;Gibson;George Gibson;george.gibson@example.com;Analyst;Sales;London;CC-1000;staff;+44 20 9935 3634;1003;2021-04-15;;active
+1014;Zachary;Murphy;Zachary Murphy;zachary.murphy@example.com;Administrator;Sales;London;CC-1000;staff;+44 20 3331 2749;1003;2026-07-17;2026-12-10;active
+1015;Wendy;Foster;Wendy Foster;wendy.foster@example.com;Analyst;Sales;London;CC-1000;staff;+44 20 2819 1193;1003;2024-05-15;2026-10-24;active
+1016;Sandra;Taylor;Sandra Taylor;sandra.taylor@example.com;Officer;Sales;London;CC-1000;staff;+44 20 4843 4006;1003;2025-10-05;;active
+1017;Rachel;Reed;Rachel Reed;rachel.reed@example.com;Specialist;Sales;London;CC-1000;staff;+44 20 5674 7458;1003;2026-10-28;;future
+1018;Walter;Hughes;Walter Hughes;walter.hughes@example.com;Administrator;Sales;London;CC-1000;staff;+44 20 5525 6881;1003;2018-08-03;;active
+1019;Zachary;Stewart;Zachary Stewart;zachary.stewart@example.com;Analyst;Sales;London;CC-1000;staff;+44 20 3829 7306;1003;2019-09-01;;active
+1020;Charles;Wright;Charles Wright;charles.wright@example.com;Specialist;Sales;London;CC-1000;staff;+44 20 8273 6961;1002;2021-06-23;;active
+1021;Vincent;Sanders;Vincent Sanders;vincent.sanders@example.com;Administrator;Sales;London;CC-1000;staff;+44 20 2140 5768;1002;2020-07-15;;active
+1022;Tina;Stewart;Tina Stewart;tina.stewart@example.com;Officer;Sales;London;CC-1000;staff;+44 20 5152 1147;1003;2014-05-18;;active
+1023;Julia;Nelson;Julia Nelson;julia.nelson@example.com;Department Head;IT;London;CC-2000;department-head;+44 20 9113 5461;;2022-11-26;;active
+1024;Karen;Bennett;Karen Bennett;karen.bennett@example.com;Manager;IT;London;CC-2000;team-lead;+44 20 9435 7996;1023;2023-10-22;;active
+1025;Nadine;Young;Nadine Young;nadine.young@example.com;Manager;IT;London;CC-2000;team-lead;+44 20 7142 6717;1023;2018-07-26;;active
+1026;Diana;Davis;Diana Davis;diana.davis@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 4095 2029;1024;2015-04-11;;active
+1027;Karen;Simmons;Karen Simmons;karen.simmons@example.com;System Administrator;IT;London;CC-2000;staff;+44 20 6773 4585;1025;2018-08-26;;active
+1028;Victoria;Graham;Victoria Graham;victoria.graham@example.com;Database Administrator;IT;London;CC-2000;staff;+44 20 2473 6662;1025;2019-04-09;2026-08-02;inactive
+1029;Oliver;Simmons;Oliver Simmons;oliver.simmons@example.com;Solution Architect;IT;London;CC-2000;staff;+44 20 9799 8009;1024;2024-07-22;;active
+1030;Daniel;Morgan;Daniel Morgan;daniel.morgan@example.com;Software Engineer;IT;London;CC-2000;staff;+44 20 5005 2384;1025;2016-11-08;;active
+1031;Daniel;Hughes;Daniel Hughes;daniel.hughes@example.com;Security Engineer;IT;London;CC-2000;staff;+44 20 9988 3155;1024;2016-10-18;;active
+1032;Tina;Hughes;Tina Hughes;tina.hughes@example.com;Solution Architect;IT;London;CC-2000;staff;+44 20 2996 5957;1024;2022-04-10;;active
+1033;Edward;Evans;Edward Evans;edward.evans@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 2463 7299;1025;2026-06-15;;active
+1034;Helen;Harris;Helen Harris;helen.harris@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 2001 1669;1024;2024-02-06;;active
+1035;Xenia;Brooks;Xenia Brooks;xenia.brooks@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 5797 4431;1024;2025-11-03;;active
+1036;Irene;Graham;Irene Graham;irene.graham@example.com;Database Administrator;IT;London;CC-2000;staff;+44 20 9700 4204;1025;2018-10-08;;active
+1037;Michael;Edwards;Michael Edwards;michael.edwards@example.com;Database Administrator;IT;London;CC-2000;staff;+44 20 6113 9569;1024;2026-06-12;2026-10-24;active
+1038;George;Watson;George Watson;george.watson@example.com;Security Engineer;IT;London;CC-2000;staff;+44 20 2538 4342;1025;2019-08-23;;active
+1039;Rachel;Fisher;Rachel Fisher;rachel.fisher@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 8234 2693;1025;2013-08-01;;active
+1040;Victoria;Ward;Victoria Ward;victoria.ward@example.com;System Administrator;IT;London;CC-2000;staff;+44 20 8933 4053;1024;2014-12-17;;active
+1041;Andrew;Brooks;Andrew Brooks;andrew.brooks@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 4751 6094;1024;2024-12-20;;active
+1042;Nathan;Gibson;Nathan Gibson;nathan.gibson@example.com;QA Engineer;IT;London;CC-2000;staff;+44 20 5844 2354;1025;2013-12-06;;active
+1043;Maria;Jenkins;Maria Jenkins;maria.jenkins@example.com;Department Head;Operations;Manchester;CC-3000;department-head;+44 20 3636 2164;;2026-04-25;;active
+1044;Olivia;Collins;Olivia Collins;olivia.collins@example.com;Manager;Operations;Manchester;CC-3000;team-lead;+44 20 9981 4362;1043;2017-02-16;;active
+1045;Irene;Campbell;Irene Campbell;irene.campbell@example.com;Manager;Operations;Manchester;CC-3000;team-lead;+44 20 3528 4215;1043;2015-12-13;;active
+1046;Andrew;Morgan;Andrew Morgan;andrew.morgan@example.com;Administrator;Operations;Manchester;CC-3000;staff;+44 20 7559 7095;1044;2025-09-14;;active
+1047;Xenia;Johnson;Xenia Johnson;xenia.johnson@example.com;Associate;Operations;Manchester;CC-3000;staff;+44 20 8689 3112;1044;2019-11-19;;active
+1048;Rachel;Sanders;Rachel Sanders;rachel.sanders@example.com;Coordinator;Operations;Manchester;CC-3000;staff;+44 20 2727 6804;1044;2025-02-10;2026-12-26;active
+1049;Peter;Ward;Peter Ward;peter.ward@example.com;Coordinator;Operations;Manchester;CC-3000;staff;+44 20 4912 6048;1044;2025-01-26;;active
+1050;Beatrice;Brooks;Beatrice Brooks;beatrice.brooks@example.com;Coordinator;Operations;Manchester;CC-3000;staff;+44 20 9808 3433;1045;2024-05-14;;active
+1051;Helen;Sullivan;Helen Sullivan;helen.sullivan@example.com;Consultant;Operations;Manchester;CC-3000;staff;+44 20 5219 6624;1044;2020-07-03;2026-08-09;inactive
+1052;Karen;Adams;Karen Adams;karen.adams@example.com;Coordinator;Operations;Manchester;CC-3000;staff;+44 20 2604 9771;1044;2022-11-28;;active
+1053;Maria;Lewis;Maria Lewis;maria.lewis@example.com;Coordinator;Operations;Manchester;CC-3000;staff;+44 20 2144 3876;1044;2020-01-29;;active
+1054;Michael;Phillips;Michael Phillips;michael.phillips@example.com;Associate;Operations;Manchester;CC-3000;staff;+44 20 7075 1225;1044;2021-04-16;;active
+1055;Yasmin;Nelson;Yasmin Nelson;yasmin.nelson@example.com;Analyst;Operations;Manchester;CC-3000;staff;+44 20 7804 9609;1044;2013-12-21;;active
+1056;Edward;Phillips;Edward Phillips;edward.phillips@example.com;Specialist;Operations;Manchester;CC-3000;staff;+44 20 3917 8878;1044;2025-08-19;2027-01-16;active
+1057;Olivia;Robinson;Olivia Robinson;olivia.robinson@example.com;Analyst;Operations;Manchester;CC-3000;staff;+44 20 7347 4400;1045;2025-04-06;;active
+1058;Ulrich;Clark;Ulrich Clark;ulrich.clark@example.com;Associate;Operations;Manchester;CC-3000;staff;+44 20 6203 5887;1045;2025-12-21;2026-11-02;active
+1059;James;Turner;James Turner;james.turner@example.com;Associate;Operations;Manchester;CC-3000;staff;+44 20 7092 6625;1045;2013-03-09;;active
+1060;Emma;Mitchell;Emma Mitchell;emma.mitchell@example.com;Consultant;Operations;Manchester;CC-3000;staff;+44 20 3798 5906;1044;2020-08-06;;active
+1061;Sandra;Cooper;Sandra Cooper;sandra.cooper@example.com;Director;Finance;London;CC-4000;department-head;+44 20 2838 1474;;2024-12-25;;active
+1062;Peter;Young;Peter Young;peter.young@example.com;Manager;Finance;London;CC-4000;team-lead;+44 20 8296 6997;1061;2015-01-11;;active
+1063;Quinn;Cooper;Quinn Cooper;quinn.cooper@example.com;Manager;Finance;London;CC-4000;team-lead;+44 20 2418 6136;1061;2015-06-24;;active
+1064;Irene;Evans;Irene Evans;irene.evans@example.com;Specialist;Finance;London;CC-4000;staff;+44 20 7995 2879;1062;2013-10-29;;active
+1065;Grace;Baker;Grace Baker;grace.baker@example.com;Officer;Finance;London;CC-4000;staff;+44 20 6073 6208;1062;2026-04-17;2026-12-04;active
+1066;Sandra;Fisher;Sandra Fisher;sandra.fisher@example.com;Consultant;Finance;London;CC-4000;staff;+44 20 4251 7010;1062;2025-04-25;;active
+1067;Diana;Campbell;Diana Campbell;diana.campbell@example.com;Officer;Finance;London;CC-4000;staff;+44 20 3433 6598;1062;2020-02-12;;active
+1068;Walter;Sullivan;Walter Sullivan;walter.sullivan@example.com;Specialist;Finance;London;CC-4000;staff;+44 20 9331 9386;1062;2023-09-07;;active
+1069;Yasmin;Walker;Yasmin Walker;yasmin.walker@example.com;Coordinator;Finance;London;CC-4000;staff;+44 20 2735 1208;1063;2026-10-28;;future
+1070;Edward;Clark;Edward Clark;edward.clark@example.com;Administrator;Finance;London;CC-4000;staff;+44 20 2687 6954;1063;2025-07-18;2027-01-01;active
+1071;Karen;Robinson;Karen Robinson;karen.robinson@example.com;Administrator;Finance;London;CC-4000;staff;+44 20 3108 7707;1063;2025-07-11;2026-12-11;active
+1072;Charles;Davis;Charles Davis;charles.davis@example.com;Administrator;Finance;London;CC-4000;staff;+44 20 5226 6103;1062;2014-10-30;;active
+1073;Frank;Fisher;Frank Fisher;frank.fisher@example.com;Department Head;Human Resources;Bristol;CC-5000;department-head;+44 20 8527 1476;;2019-04-02;;active
+1074;Laura;Sanders;Laura Sanders;laura.sanders@example.com;Team Lead;Human Resources;Bristol;CC-5000;team-lead;+44 20 4896 5294;1073;2015-12-01;;active
+1075;Yasmin;Stewart;Yasmin Stewart;yasmin.stewart@example.com;Team Lead;Human Resources;Bristol;CC-5000;team-lead;+44 20 4640 9134;1073;2018-05-22;;active
+1076;Rachel;Hughes;Rachel Hughes;rachel.hughes@example.com;Analyst;Human Resources;Bristol;CC-5000;staff;+44 20 9832 7551;1075;2022-03-13;;active
+1077;Isaac;Adams;Isaac Adams;isaac.adams@example.com;Officer;Human Resources;Bristol;CC-5000;staff;+44 20 7683 8780;1075;2017-11-11;;active
+1078;Yasmin;Carter;Yasmin Carter;yasmin.carter@example.com;Associate;Human Resources;Bristol;CC-5000;staff;+44 20 3222 5146;1074;2016-05-23;;active
+1079;Olivia;Nelson;Olivia Nelson;olivia.nelson@example.com;Coordinator;Human Resources;Bristol;CC-5000;staff;+44 20 9891 8422;1075;2018-02-20;;active
+1080;Zachary;Lewis;Zachary Lewis;zachary.lewis@example.com;Analyst;Human Resources;Bristol;CC-5000;staff;+44 20 3783 2828;1075;2024-05-03;;active
+1081;Diana;Thompson;Diana Thompson;diana.thompson@example.com;Officer;Human Resources;Bristol;CC-5000;staff;+44 20 4989 4151;1074;2024-09-03;;active
+1082;Olivia;Hall;Olivia Hall;olivia.hall@example.com;Coordinator;Human Resources;Bristol;CC-5000;staff;+44 20 2565 4618;1074;2024-04-11;2026-05-26;inactive
+1083;Grace;Sanders;Grace Sanders;grace.sanders@example.com;Department Head;Marketing;London;CC-6000;department-head;+44 20 9291 9078;;2017-09-04;;active
+1084;Frank;Kelly;Frank Kelly;frank.kelly@example.com;Team Lead;Marketing;London;CC-6000;team-lead;+44 20 8046 9291;1083;2026-10-10;;future
+1085;Michael;Baker;Michael Baker;michael.baker@example.com;Team Lead;Marketing;London;CC-6000;team-lead;+44 20 7703 4714;1083;2016-09-01;;active
+1086;Karen;Richardson;Karen Richardson;karen.richardson@example.com;Coordinator;Marketing;London;CC-6000;staff;+44 20 4414 1498;1085;2018-09-05;;active
+1087;Wendy;Stewart;Wendy Stewart;wendy.stewart@example.com;Coordinator;Marketing;London;CC-6000;staff;+44 20 8653 6377;1085;2024-06-30;;active
+1088;Edward;Foster;Edward Foster;edward.foster@example.com;Officer;Marketing;London;CC-6000;staff;+44 20 4256 6062;1084;2015-06-01;;active
+1089;Lucas;Cooper;Lucas Cooper;lucas.cooper@example.com;Coordinator;Marketing;London;CC-6000;staff;+44 20 5552 9753;1084;2026-01-25;;active
+1090;Sandra;Adams;Sandra Adams;sandra.adams@example.com;Officer;Marketing;London;CC-6000;staff;+44 20 3297 4070;1084;2024-02-25;;active
+1091;Olivia;Clark;Olivia Clark;olivia.clark@example.com;Director;Procurement;Manchester;CC-7000;department-head;+44 20 6297 7628;;2026-11-05;;future
+1092;Henry;Murphy;Henry Murphy;henry.murphy@example.com;Associate;Procurement;Manchester;CC-7000;staff;+44 20 8273 5875;1091;2016-11-13;;active
+1093;Helen;Mitchell;Helen Mitchell;helen.mitchell@example.com;Associate;Procurement;Manchester;CC-7000;staff;+44 20 9071 4504;1091;2013-09-26;;active
+1094;Vincent;Morgan;Vincent Morgan;vincent.morgan@example.com;Specialist;Procurement;Manchester;CC-7000;staff;+44 20 4501 5874;1091;2020-09-27;;active
+1095;Xenia;Simmons;Xenia Simmons;xenia.simmons@example.com;Consultant;Procurement;Manchester;CC-7000;staff;+44 20 2547 4025;1091;2021-04-14;;active
+1096;Henry;Richardson;Henry Richardson;henry.richardson@example.com;Specialist;Procurement;Manchester;CC-7000;staff;+44 20 2072 7360;1091;2017-10-02;;active
+1097;Kevin;Parker;Kevin Parker;kevin.parker@example.com;Director;Legal;London;CC-8000;department-head;+44 20 5252 2462;;2025-06-13;;active
+1098;James;Graham;James Graham;james.graham@example.com;Coordinator;Legal;London;CC-8000;staff;+44 20 4381 2827;1097;2018-12-08;;active
+1099;Patricia;Sanders;Patricia Sanders;patricia.sanders@example.com;Consultant;Legal;London;CC-8000;staff;+44 20 4947 3677;1097;2026-02-12;2026-12-21;active
+1100;Vincent;Baker;Vincent Baker;vincent.baker@example.com;Administrator;Legal;London;CC-8000;staff;+44 20 2783 9804;1097;2023-06-08;;active

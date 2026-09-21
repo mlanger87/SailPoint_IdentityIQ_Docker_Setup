@@ -155,15 +155,20 @@ Die Mail-Konfiguration (`data/objects/10-Configuration-Mail.xml`) ändert nur ei
 Schlüssel der `SystemConfiguration`. Referenzprojekt A patcht stattdessen die `init.xml`
 per `sed` — das ist destruktiv und überlebt kein Upgrade.
 
-### Warum die LDAP-Testdaten generiert und nicht gepflegt werden
+### Warum die Testdaten generiert und nicht gepflegt werden
 
-`scripts/generate-ldif.py` erzeugt `02-users.ldif` und `03-groups.ldif`. Die Dateien sind
-**Artefakte** — sie liegen im Git, weil das LDAP sie beim Start braucht, aber geändert
-wird der Generator.
+`scripts/generate-testdata.py` erzeugt aus **einer** Personenliste drei Dateien:
+`data/hr/HR-people.csv`, `02-users.ldif` und `03-groups.ldif`. Sie sind **Artefakte** —
+sie liegen im Git, weil die Container sie beim Start brauchen, aber geändert wird der
+Generator.
+
+Eine gemeinsame Quelle ist hier mehr als Bequemlichkeit: Die `employeeNumber` der
+LDAP-Seed-Accounts **muss** zu einer Zeile der CSV passen, sonst korreliert nichts.
+Zwei getrennt gepflegte Dateien wären nach der ersten Änderung auseinandergelaufen.
 
 Drei der vier Referenzprojekte setzen phpLDAPadmin ein und legen Testdaten von Hand über
-die Oberfläche an. Das skaliert nicht: Bei 100 Benutzern und 964 Mitgliedschaften wäre
-weder die Verteilung nachvollziehbar noch eine Änderung der Datenmenge praktikabel.
+die Oberfläche an. Das skaliert nicht: Bei 100 Personen wäre weder die Verteilung
+nachvollziehbar noch eine Änderung der Datenmenge praktikabel.
 
 Ein fester Zufallsstartwert (`SEED`) macht die Erzeugung reproduzierbar — derselbe Aufruf
 liefert dieselben Daten. Das ist nötig, damit ein neu aufgebautes Verzeichnis dieselben
@@ -276,6 +281,220 @@ LDAP-Server mit Weboberfläche und würde OpenLDAP ersetzen statt ergänzen.
 
 Anmeldung erfolgt über `BIND_PATTERN=cn=%s,<BASE_DN>`, man gibt also nur `admin` ein statt
 des vollständigen DN.
+
+### IIQ-XML: Fallstricke beim Import
+
+Die Objekte in `data/objects/` wurden gegen die **laufende 8.5-Instanz** verifiziert,
+nicht aus Beispielen im Netz übernommen. Vier Dinge sind dabei aufgefallen:
+
+**1. Die maßgebliche DTD wird zur Laufzeit erzeugt.** Sie liegt nirgends als Datei — die
+Klasse `sailpoint.tools.xml.DTDBuilder` baut sie aus den Objektmodellen. Ausgeben lässt
+sie sich in der Konsole:
+
+```
+dtd /tmp/sailpoint.dtd
+```
+
+Bei jeder Unsicherheit über ein Attribut ist das die Quelle, nicht die Erinnerung.
+
+**2. `searchable` gibt es nicht.** In vielen Beispielen steht
+`<ObjectAttribute searchable="true">`. Die 8.5-DTD kennt das Attribut nicht, der Import
+scheitert mit *„Attribute searchable must be declared"*. Das Gegenstück heißt
+**`extendedNumber`** (Spalten `extended1…extendedN`) oder **`namedColumn`** (eigene
+benannte Spalte).
+
+Das ist kein kosmetischer Unterschied: Ohne extendedNumber liegt der Wert nur im XML-Blob
+und **kein Filter findet ihn** — Rollenzuweisung über `Selector` und der
+`managerCorrelationFilter` laufen dann still ins Leere, ohne Fehlermeldung.
+
+**3. `AttributeSource` nimmt kein `AttributeRef`.** Laut DTD:
+
+```
+<!ELEMENT AttributeSource ((ApplicationRef|RuleRef)*)>
+```
+
+Das Quellattribut gehört ins `name`-Attribut: `<AttributeSource name="employeeNumber">`.
+
+**4. Der Task-Typ heißt `Identity`, nicht `IdentityRefresh`.** Die Fehlermeldung listet
+dankenswerterweise alle gültigen Werte auf.
+
+**Bonus — XML-Kommentare:** Doppelbindestriche sind in XML-Kommentaren verboten. Eine
+Trennlinie aus `-----` bricht die Datei. Hier werden `=====` verwendet.
+
+### `run` in der IIQ-Konsole braucht Anführungszeichen
+
+```
+run "LDAP Group Aggregation"      richtig
+run LDAP Group Aggregation        falsch
+```
+
+Ohne Anführungszeichen trennt die Konsole am Leerzeichen und sucht eine Aufgabe namens
+`LDAP` — Ergebnis: *„Ambiguous objects: LDAP Group Aggregation, LDAP Account
+Aggregation"*. Tückisch, weil der Exitcode 0 bleibt und die Aufgabe einfach nicht läuft.
+
+Hinzu kommt: `run` startet die Aufgabe über Quartz und kehrt sofort zurück. Beendet man
+die Konsole gleich danach, fährt sie den Scheduler herunter und bricht die laufende
+Aufgabe ab (*„The Scheduler has been shutdown"*). Für einen Lauf aus dem Skript muss die
+Konsole offen bleiben, bis die Aufgabe fertig ist — in der Oberfläche unter
+**Setup > Tasks** stellt sich die Frage nicht.
+
+### `groupOfNames` verlangt mindestens ein `member`
+
+Laut RFC 4519 ist eine mitgliederlose `groupOfNames` schema-widrig; slapd lehnt sie ab und
+**bricht den gesamten LDIF-Import ab** — im Log steht nur „Loading custom LDIF files…",
+kein Fehler. Symptom: 5 Accounts sind da, aber null Gruppen.
+
+Da das Verzeichnis Zielsystem ist, sind viele Gruppen zunächst leer. Gelöst über den in
+echten Verzeichnissen üblichen Platzhalter: `cn=placeholder,dc=example,dc=com` dient
+leeren Gruppen als einziges `member`. Er liegt bewusst **außerhalb** von `ou=people` und
+fällt damit nicht in den Suchbereich der Account-Aggregation.
+
+Die Alternative `groupOfMembers` (wo `member` optional ist) steht im Bitnami-Image nicht
+zur Verfügung — nur `groupOfNames` und `groupOfUniqueNames`.
+
+### Gruppen-objectClass muss zum Schema passen
+
+Ein Export aus einer anderen 8.5-Instanz nutzte `groupOfUniqueNames` mit
+`groupMemberAttribute="uniqueMember"`. Unser Verzeichnis führt `groupOfNames` mit
+`member`. Übernimmt man das ungeprüft, liefert die Gruppenaggregation **kein Ergebnis** —
+ohne Fehler. Beide Werte müssen zusammenpassen.
+
+### BeanShell: nicht gebundene Argumente sind `void`, nicht `null`
+
+Der teuerste Fehler dieses Aufbaus. Die Regel `HR Set Inactive` prüfte anfangs
+`if (link != null)`. Das schützt **nicht** — es löst den Fehler selbst aus, weil schon
+das Auflösen der undefinierten Variablen scheitert:
+
+```
+bsh.EvalError: Attempt to resolve method: getAttribute() on undefined
+variable or class name: link
+```
+
+Richtig ist die Prüfung auf `void`, mit Normalisierung auf eine lokale Variable:
+
+```java
+Link hrLink = null;
+if (link != void && link != null) {
+    hrLink = link;
+}
+```
+
+Betroffen ist jedes Argument, das je nach Aufrufkontext fehlen kann — `link`, `result`,
+`accountRequest`, `oldValue`. Dieselbe Regel läuft aus mehreren Kontexten: bei der
+Aggregation ist `link` gebunden, beim Identity-Refresh ohne Account nicht.
+
+**Die Folgekosten waren beträchtlich:** Der Fehler trat je Identität auf, die Aggregation
+endete mit `Error`, und statt 102 Identitäten standen **185** in der Datenbank — jede
+gescheiterte Zeile erzeugte eine zusätzliche. Aufräumen ließ sich das nur über
+`sailpoint.api.Terminator`; ein direktes `DELETE FROM spt_identity` scheitert an
+Fremdschlüsseln (`spt_identity_capabilities`).
+
+### Signaturen an der laufenden Instanz prüfen, nicht aus dem Gedächtnis
+
+Das JavaDoc listet für `Link` nur `toString()` — alle Getter sind geerbt und dort nicht
+dokumentiert. Verlässlich ist eine Prüf-Rule mit Reflection:
+
+```
+import /tmp/SigCheck.xml
+rule "ZZ Sig Check"
+```
+
+So verifiziert (IIQ 8.5):
+
+| Aufruf | Befund |
+|---|---|
+| `Link.getAttribute(String)` | existiert, liefert `Object` |
+| `Link.getStringAttribute(...)` | **existiert nicht** — nur `Identity` hat das |
+| `Identity.getStringAttribute(String)` | existiert, kann `null` liefern |
+| `Identity.isInactive()` | existiert |
+| `ProvisioningResult.addError(String)` | existiert, daneben `(Message)` und `(Throwable)` |
+| `STATUS_*` | `queued`, `committed`, `failed`, `retry` |
+| `Schema.getAttributeDefinition(String)` | existiert |
+| `JDBCConnector.buildMapFromResultSet(ResultSet, Schema)` | existiert |
+
+**`source` in der Konsole taugt dafür nicht** — es liest die Datei zeilenweise als
+Konsolenbefehle, nicht als BeanShell. Der Weg führt über eine temporäre Rule.
+
+### IdentityTrigger: `Handler` ist kein Element
+
+Ein Trigger referenziert seinen Workflow über das **Attribut** `handler` plus
+`HandlerParameters` — nicht über ein `<Handler>`-Element. Die DTD erlaubt nur
+`AssignedScope`, `Description`, `Owner`, `HandlerParameters`, `PendingWorkflow`,
+`TriggerRule` und `Selector`.
+
+```xml
+<IdentityTrigger name="HR Leaver" attributeName="inactive"
+                 oldValueFilter="false" newValueFilter="true"
+                 type="AttributeChange"
+                 handler="sailpoint.api.WorkflowTriggerHandler">
+  <HandlerParameters>
+    <Attributes>
+      <Map><entry key="workflow" value="HR Leaver Workflow"/></Map>
+    </Attributes>
+  </HandlerParameters>
+</IdentityTrigger>
+```
+
+Der Typ heißt `Rule` mit großem R; erlaubt sind `Create`, `Delete`, `AttributeChange`,
+`Rule`, `ManagerTransfer`, `NativeChange`, `Alert`, `RapidSetup`.
+
+Die Vorlage liefert die Instanz selbst: `get IdentityTrigger Leaver`.
+
+**Für datumsgesteuerte Eintritte taugt `type="Create"` nicht** — der mitgelieferte Joiner
+nutzt das, aber bei einem künftigen Eintrittsdatum entsteht die Identität lange vor dem
+ersten Arbeitstag. Beide Trigger hier laufen deshalb über den Wechsel von `inactive`.
+
+### Gruppenaggregation: `AccountGroupScan` gibt es nicht mehr
+
+In 8.5 nutzt auch die Gruppenaggregation `sailpoint.task.ResourceIdentityScan`;
+unterschieden wird über `<entry key="aggregationType" value="group"/>`. Die in älteren
+Beispielen genannte Klasse `sailpoint.task.AccountGroupScan` führt zu `Error`, mit dem
+Klassennamen als einziger Meldung.
+
+### `AttributeSource` mit Regel braucht eine `ApplicationRef`
+
+Das Attribut `inactive` sollte über die Regel `HR Set Inactive` aus den Datumsfeldern
+berechnet werden. Zunächst als reine `RuleRef`:
+
+```xml
+<AttributeSource name="Rule: HR Set Inactive">
+  <RuleRef><Reference class="sailpoint.object.Rule" name="HR Set Inactive"/></RuleRef>
+</AttributeSource>
+```
+
+Ergebnis: **kein Fehler, kein Logeintrag — und keine Wirkung.** Der direkte Aufruf der
+Regel lieferte nachweislich `true` für einen Ausgeschiedenen, aber `Identity.inactive`
+blieb `false`. Die Regel wurde beim Refresh schlicht nie aufgerufen.
+
+Richtig ist die anwendungsgebundene Form — dasselbe Muster zeigt ein Export aus einer
+produktiven 8.5-Instanz (`AppRule: …`):
+
+```xml
+<AttributeSource name="AppRule: HR Set Inactive">
+  <ApplicationRef>
+    <Reference class="sailpoint.object.Application" name="HR-Application"/>
+  </ApplicationRef>
+  <RuleRef><Reference class="sailpoint.object.Rule" name="HR Set Inactive"/></RuleRef>
+</AttributeSource>
+```
+
+Diese Klasse von Fehlern ist besonders unangenehm, weil nichts auffällt: kein Stacktrace,
+keine Warnung, nur ein Attribut, das stillschweigend seinen Vorgabewert behält. Prüfen
+lässt sich so etwas nur, indem man die Regel isoliert über `context.runRule(rule, args)`
+aufruft und ihr Ergebnis mit dem tatsächlichen Attributwert vergleicht.
+
+### Reihenfolge: durchsuchbare Attribute vor der ersten Aggregation
+
+Der `managerCorrelationFilter` auf `employeeNumber` blieb zunächst wirkungslos — die
+Hierarchie war leer, ohne jede Fehlermeldung. Der Filter selbst war korrekt; ein
+isolierter Test mit `Filter.eq("employeeNumber", "1001")` fand die richtige Identität.
+
+Die Ursache war die Reihenfolge: Beim ersten Aggregationslauf war `employeeNumber` noch
+nicht als `extendedNumber` definiert, lag also nur im XML-Blob und war nicht filterbar.
+Nach dem Import der ObjectConfig muss die Aggregation deshalb **erneut** laufen.
+
+Merksatz: Erst `ObjectConfig`, dann Aggregation, dann Refresh. Ein nachträglich ergänztes
+durchsuchbares Attribut erfordert einen weiteren Aggregationslauf.
 
 ### Nach einem Umzug des Docker-Datenverzeichnisses
 

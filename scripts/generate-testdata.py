@@ -1,38 +1,70 @@
 #!/usr/bin/env python3
 # ===========================================================================
-# Generator fuer die LDAP-Testdaten
+# Generator fuer die Testdaten der Entwicklungsumgebung
 # ---------------------------------------------------------------------------
-# Erzeugt docker/openldap/ldif/02-users.ldif und 03-groups.ldif neu.
+# Erzeugt aus EINER Personenliste zwei Ausgaben:
 #
-# Die Daten selbst sind englisch gehalten - so sehen Verzeichnisse in
-# realen IdentityIQ-Projekten in aller Regel aus.
+#   data/hr/HR-people.csv            autoritative Quelle (alle Personen)
+#   docker/openldap/ldif/02-users.ldif   nur die Seed-Accounts im Zielsystem
+#   docker/openldap/ldif/03-groups.ldif  alle Gruppen (Entitlements)
 #
-# Warum ein Generator statt handgeschriebener LDIF-Dateien:
+# Die Rollenverteilung der Systeme:
+#   - Die HR-CSV ist die QUELLE. Sie erzeugt in IIQ die Identitaeten.
+#   - LDAP ist das ZIELSYSTEM. Dort legt IIQ Accounts an; es ist deshalb
+#     bis auf wenige Seed-Accounts leer.
+#
+# Warum ueberhaupt Seed-Accounts und nicht ein komplett leeres LDAP:
+# Damit sich der Korrelationsfall testen laesst - ein bereits bestehender
+# Account trifft auf eine neu erzeugte Identitaet. Bei einem leeren
+# Verzeichnis gaebe es nur den Provisionierungsfall.
+#
+# Die Gruppen bleiben dagegen VOLLSTAENDIG im Verzeichnis: sie sind die
+# Entitlements, die IIQ zuweisen koennen soll. Ein Zielsystem ohne
+# Gruppen kann nichts Interessantes provisionieren.
+#
+# Die Daten sind englisch gehalten, wie in realen Projekten ueblich.
+#
+# Warum ein Generator statt handgepflegter Dateien:
+#   - Beide Ausgaben stammen aus derselben Personenliste und koennen
+#     deshalb gar nicht auseinanderlaufen. Die employeeNumber der
+#     Seed-Accounts passt garantiert zu einer Zeile in der CSV.
 #   - Die Datenmenge laesst sich aendern, ohne hunderte Zeilen zu pflegen.
-#   - Die Verteilung (Gruppengroessen, Hierarchie) ist als Code lesbar
-#     und damit nachvollziehbar.
 #   - Ein fester Zufallsstartwert macht den Lauf reproduzierbar: gleicher
 #     Aufruf, gleiche Daten. Das ist wichtig, damit ein neu erzeugtes
 #     Verzeichnis dieselben Korrelationsergebnisse liefert wie vorher.
 #
 # Aufruf:
-#     python scripts/generate-ldif.py
-#     python scripts/generate-ldif.py --users 250 --groups 80
+#     python scripts/generate-testdata.py
+#     python scripts/generate-testdata.py --users 250 --seed-accounts 10
 #
-# Anschliessend muss das LDAP-Volume neu aufgebaut werden, da die LDIFs
-# nur bei leerem Datenverzeichnis eingelesen werden:
+# Die CSV wird vom IIQ-Container gelesen und ist per Bind-Mount sofort
+# wirksam - eine Aenderung braucht nur einen neuen Aggregationslauf.
+#
+# Die LDIFs werden dagegen nur bei LEEREM Datenverzeichnis eingelesen:
 #     docker compose rm -sf openldap
 #     docker volume rm iiq85_ldapdata
 #     docker compose up -d openldap
 # ===========================================================================
 import argparse
 import base64
+import csv
+import datetime
 import random
 import unicodedata
 from pathlib import Path
 
 BASE_DN = "dc=example,dc=com"
 PEOPLE_DN = f"ou=people,{BASE_DN}"
+
+# Die objectClass groupOfNames verlangt laut RFC 4519 mindestens ein
+# member - eine leere Gruppe ist schema-widrig und wird von slapd
+# abgelehnt. Da das Verzeichnis Zielsystem ist, sind aber viele
+# Gruppen zunaechst leer und warten auf Provisionierung.
+#
+# Loesung ist der in echten Verzeichnissen uebliche Platzhalter: ein
+# eigener Eintrag, der leeren Gruppen als einziges member dient.
+# In IIQ wird er ueber den Aggregationsfilter ausgeblendet.
+PLACEHOLDER_DN = f"cn=placeholder,{BASE_DN}"
 GROUPS_DN = f"ou=groups,{BASE_DN}"
 PASSWORD = "password"
 
@@ -42,6 +74,18 @@ DEPT_HR = "Human Resources"
 
 # Fester Startwert: gleicher Aufruf erzeugt exakt dieselben Daten.
 SEED = 20250921
+
+# Stichtag fuer die Datumsberechnung. Bewusst NICHT date.today(): sonst
+# aendert sich die Datei bei jedem Lauf und die Reproduzierbarkeit waere
+# dahin. Die Datumswerte werden relativ zu diesem Tag erzeugt.
+STICHTAG = datetime.date(2026, 9, 21)
+
+# Verteilung der Lebenszyklus-Faelle. Die Zahlen sind Prozentwerte und
+# so gewaehlt, dass sich jeder Fall testen laesst, ohne dass die
+# Ausnahmen die Normalfaelle erdruecken.
+ANTEIL_ZUKUENFTIGER_EINTRITT = 5     # Joiner: Eintritt liegt vor uns
+ANTEIL_BEFRISTET_AKTIV = 10          # Enddatum gesetzt, noch nicht erreicht
+ANTEIL_AUSGESCHIEDEN = 8             # Leaver: Enddatum ist ueberschritten
 
 FIRST_NAMES = [
     "Alice", "Brian", "Claire", "Daniel", "Emma", "Frank", "Grace",
@@ -188,6 +232,44 @@ def ldif_value(attribute: str, value: str) -> str:
     return f"{attribute}:: {encoded}"
 
 
+def lebenszyklus(rnd: random.Random) -> tuple[str, str, str]:
+    """
+    Wuerfelt Eintritts- und Austrittsdatum sowie den daraus folgenden
+    Status.
+
+    Der Status wird hier BERECHNET und nicht frei gewuerfelt - sonst
+    gaebe es Zeilen, die sich widersprechen (etwa "active" bei einem
+    Austritt in der Vergangenheit). Genau solche Widersprueche machen
+    Testdaten fuer Lifecycle-Prozesse unbrauchbar.
+
+    Rueckgabe: (startDate, endDate, status) im Format JJJJ-MM-TT.
+    endDate ist leer, wenn unbefristet.
+    """
+    wurf = rnd.randint(1, 100)
+
+    # Fall 1: Eintritt liegt in der Zukunft (Joiner).
+    if wurf <= ANTEIL_ZUKUENFTIGER_EINTRITT:
+        start = STICHTAG + datetime.timedelta(days=rnd.randint(3, 45))
+        return start.isoformat(), "", "future"
+
+    # Fall 2: bereits ausgeschieden (Leaver).
+    if wurf <= ANTEIL_ZUKUENFTIGER_EINTRITT + ANTEIL_AUSGESCHIEDEN:
+        start = STICHTAG - datetime.timedelta(days=rnd.randint(400, 3000))
+        ende = STICHTAG - datetime.timedelta(days=rnd.randint(1, 180))
+        return start.isoformat(), ende.isoformat(), "inactive"
+
+    # Fall 3: befristet, aber noch aktiv - das Enddatum liegt vor uns.
+    if wurf <= (ANTEIL_ZUKUENFTIGER_EINTRITT + ANTEIL_AUSGESCHIEDEN
+                + ANTEIL_BEFRISTET_AKTIV):
+        start = STICHTAG - datetime.timedelta(days=rnd.randint(30, 900))
+        ende = STICHTAG + datetime.timedelta(days=rnd.randint(5, 120))
+        return start.isoformat(), ende.isoformat(), "active"
+
+    # Fall 4: der Normalfall - unbefristet beschaeftigt.
+    start = STICHTAG - datetime.timedelta(days=rnd.randint(60, 5000))
+    return start.isoformat(), "", "active"
+
+
 def build_people(count: int, rnd: random.Random) -> list[dict]:
     """
     Verteilt die Personen gemaess den Gewichten auf die Abteilungen und
@@ -251,8 +333,30 @@ def build_people(count: int, rnd: random.Random) -> list[dict]:
                 "phone": f"+44 20 {rnd.randint(2000, 9999)} {rnd.randint(1000, 9999)}",
                 "manager": None,
             }
+
+            # Eintritt, Austritt und der daraus folgende Status.
+            start, ende, status = lebenszyklus(rnd)
+            person["startDate"] = start
+            person["endDate"] = ende
+            person["status"] = status
             next_number += 1
             department_people.append(person)
+
+        # Fuehrungskraefte bleiben aktiv und unbefristet.
+        #
+        # Waere eine Abteilungsleitung ausgeschieden, zeigte der
+        # manager-Verweis ihrer Mitarbeitenden auf eine inaktive
+        # Identitaet - die Manager-Zertifizierung liefe dann ins Leere.
+        # Der Leaver-Fall bleibt ueber die Mitarbeitenden trotzdem
+        # testbar.
+        for person in department_people:
+            if person["level"] != "staff":
+                person["endDate"] = ""
+                # status nur dann auf active setzen, wenn der Eintritt
+                # nicht noch bevorsteht - sonst entstuende der
+                # Widerspruch "active" bei kuenftigem startDate.
+                if person["status"] == "inactive":
+                    person["status"] = "active"
 
         # Hierarchie innerhalb der Abteilung verdrahten.
         head = department_people[0]
@@ -346,21 +450,29 @@ def build_groups(people: list[dict], count: int, rnd: random.Random) -> list[dic
 
 
 def write_users(path: Path, people: list[dict]) -> None:
+    """
+    Schreibt NUR die Seed-Accounts. LDAP ist das Zielsystem - die
+    uebrigen Accounts legt IIQ per Provisionierung selbst an.
+    """
     password_b64 = base64.b64encode(PASSWORD.encode()).decode()
     lines: list[str] = [
         "# ===========================================================================",
-        "# Testbenutzer",
+        "# Seed-Accounts im Zielsystem",
         "# ---------------------------------------------------------------------------",
-        "# ERZEUGT von scripts/generate-ldif.py - Aenderungen hier gehen beim",
+        "# ERZEUGT von scripts/generate-testdata.py - Aenderungen hier gehen beim",
         "# naechsten Lauf verloren. Stattdessen den Generator anpassen.",
         "#",
         f"# Anzahl: {len(people)}",
         f'# Passwort aller Konten: "{PASSWORD}"',
         "#",
-        "# Die Attribute sind auf IdentityIQ-Uebungen hin gewaehlt:",
-        "#   employeeNumber   eindeutiger Schluessel fuer die Korrelation",
-        "#   manager          mehrstufige Hierarchie (Department Head, Team Lead)",
-        "#   departmentNumber / l / employeeType  Merkmale fuer Rollenzuordnung",
+        "# LDAP ist hier das ZIELSYSTEM, nicht die Quelle. Es enthaelt",
+        "# deshalb absichtlich nur wenige Accounts: alle uebrigen legt",
+        "# IdentityIQ aus der HR-CSV heraus per Provisionierung an.",
+        "#",
+        "# Diese wenigen Accounts gibt es, damit sich der Korrelationsfall",
+        "# testen laesst - bestehender Account trifft auf neue Identitaet.",
+        "# Ihre employeeNumber kommt aus derselben Personenliste wie die",
+        "# CSV, die Korrelation greift also garantiert.",
         "# ===========================================================================",
         "",
     ]
@@ -400,7 +512,7 @@ def write_groups(path: Path, groups: list[dict]) -> None:
         "# ===========================================================================",
         "# Testgruppen",
         "# ---------------------------------------------------------------------------",
-        "# ERZEUGT von scripts/generate-ldif.py - Aenderungen hier gehen beim",
+        "# ERZEUGT von scripts/generate-testdata.py - Aenderungen hier gehen beim",
         "# naechsten Lauf verloren. Stattdessen den Generator anpassen.",
         "#",
         f"# Anzahl Gruppen: {len(groups)}",
@@ -413,6 +525,15 @@ def write_groups(path: Path, groups: list[dict]) -> None:
         "#   app-*    Anwendungsberechtigungen (Entitlements)",
         "#",
         "# objectClass groupOfNames - das Attribut member enthaelt volle DNs.",
+        "#",
+        "# Die Gruppen sind vollstaendig vorhanden, auch wenn im Verzeichnis",
+        "# nur wenige Accounts liegen: sie sind die Entitlements, die IIQ",
+        "# zuweisen koennen soll. member verweist nur auf die Seed-Accounts,",
+        "# da ein DN auf einen nicht existierenden Eintrag zeigen wuerde.",
+        "#",
+        "# Gruppen ohne Seed-Mitglied erhalten cn=placeholder als member:",
+        "# groupOfNames verlangt mindestens eines (RFC 4519). Der Eintrag",
+        "# wird in 01-structure.ldif angelegt und in IIQ herausgefiltert.",
         "# ===========================================================================",
         "",
     ]
@@ -425,38 +546,196 @@ def write_groups(path: Path, groups: list[dict]) -> None:
             f"cn: {group['cn']}",
             ldif_value("description", group["description"]),
         ])
-        for uid in group["members"]:
-            lines.append(f"member: uid={uid},{PEOPLE_DN}")
+        if group["members"]:
+            for uid in group["members"]:
+                lines.append(f"member: uid={uid},{PEOPLE_DN}")
+        else:
+            # Ohne dieses member wuerde slapd den Eintrag ablehnen.
+            lines.append(f"member: {PLACEHOLDER_DN}")
         lines.append("")
 
     path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
+def write_hr_csv(path: Path, people: list[dict]) -> None:
+    """
+    Schreibt die autoritative HR-Quelle.
+
+    Trennzeichen ist das Semikolon, passend zur Application-Definition
+    (entry key="delimiter" value=";"). Ein Semikolon ist hier robuster
+    als ein Komma, weil Freitextfelder wie der Titel sonst haeufiger
+    escaped werden muessten.
+
+    Die Manager-Spalte enthaelt die employeeNumber des Vorgesetzten,
+    nicht dessen Namen - IIQ loest die Hierarchie ueber den
+    managerCorrelationFilter auf diesen Schluessel auf.
+
+    startDate und endDate steuern den Lebenszyklus:
+        startDate in der Zukunft  -> Eintritt steht bevor (Joiner)
+        endDate leer              -> unbefristet
+        endDate in der Zukunft    -> befristet, noch aktiv
+        endDate in der Vergangenheit -> ausgeschieden (Leaver)
+
+    Die Spalte status ist daraus ABGELEITET und wird nicht unabhaengig
+    gewuerfelt - sonst entstuenden widerspruechliche Zeilen wie "active"
+    bei laengst ueberschrittenem Austrittsdatum.
+    """
+    spalten = [
+        "employeeNumber", "firstName", "lastName", "displayName", "email",
+        "title", "department", "location", "costCentre", "employeeType",
+        "phone", "managerEmployeeNumber", "startDate", "endDate", "status",
+    ]
+
+    nach_uid = {p["uid"]: p for p in people}
+
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, delimiter=";", quoting=csv.QUOTE_MINIMAL,
+                            lineterminator="\n")
+        writer.writerow(spalten)
+        for person in people:
+            manager = nach_uid.get(person["manager"]) if person["manager"] else None
+            writer.writerow([
+                person["employeeNumber"],
+                person["first"],
+                person["last"],
+                person["cn"],
+                person["mail"],
+                person["title"],
+                person["department"],
+                person["location"],
+                person["costCentre"],
+                person["level"],
+                person["phone"],
+                manager["employeeNumber"] if manager else "",
+                person["startDate"],
+                person["endDate"],
+                person["status"],
+            ])
+
+
+def pick_seed_accounts(people: list[dict], count: int,
+                       rnd: random.Random) -> list[dict]:
+    """
+    Waehlt die Personen aus, die bereits einen LDAP-Account haben.
+
+    Die Auswahl ist nicht rein zufaellig: Es sollen verschiedene
+    Abteilungen und Hierarchieebenen vertreten sein, damit die
+    Korrelation nicht nur an einem einzigen Muster geprueft wird.
+    """
+    if count >= len(people):
+        return list(people)
+
+    ausgewaehlt: list[dict] = []
+    gesehen: set[str] = set()
+
+    # Zuerst je eine Person aus moeglichst vielen Abteilungen.
+    nach_abteilung: dict[str, list[dict]] = {}
+    for person in people:
+        nach_abteilung.setdefault(person["department"], []).append(person)
+
+    for abteilung in sorted(nach_abteilung):
+        if len(ausgewaehlt) >= count:
+            break
+        kandidat = rnd.choice(nach_abteilung[abteilung])
+        ausgewaehlt.append(kandidat)
+        gesehen.add(kandidat["uid"])
+
+    # Rest zufaellig auffuellen.
+    rest = [p for p in people if p["uid"] not in gesehen]
+    fehlend = count - len(ausgewaehlt)
+    if fehlend > 0 and rest:
+        ausgewaehlt.extend(rnd.sample(rest, min(fehlend, len(rest))))
+
+    return sorted(ausgewaehlt, key=lambda p: p["employeeNumber"])
+
+
+def limit_groups_to_seeds(groups: list[dict],
+                          seed_uids: set[str]) -> list[dict]:
+    """
+    Entfernt aus den Gruppen alle Mitglieder, die keinen Account im
+    Verzeichnis haben.
+
+    Notwendig, weil member einen echten DN erwartet. Ein Verweis auf
+    einen nicht existierenden Eintrag ist zwar in OpenLDAP mit der
+    Standardkonfiguration erlaubt, waere aber bei der Aggregation
+    irrefuehrend: IIQ meldete Entitlements fuer Accounts, die es nicht
+    gibt.
+
+    Die Gruppe selbst bleibt bestehen, auch wenn sie dadurch leer wird -
+    sie ist ein Entitlement, das IIQ zuweisen koennen soll.
+    """
+    begrenzt: list[dict] = []
+    for group in groups:
+        begrenzt.append({
+            **group,
+            "members": [uid for uid in group["members"] if uid in seed_uids],
+        })
+    return begrenzt
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Erzeugt die LDAP-Testdaten (Benutzer und Gruppen).")
+        description="Erzeugt die Testdaten: HR-CSV (Quelle) und LDAP-LDIFs (Ziel).")
     parser.add_argument("--users", type=int, default=100,
-                        help="Anzahl der Benutzer (Vorgabe: 100)")
+                        help="Anzahl der Personen in der HR-CSV (Vorgabe: 100)")
     parser.add_argument("--groups", type=int, default=50,
-                        help="Anzahl der Gruppen (Vorgabe: 50)")
+                        help="Anzahl der LDAP-Gruppen (Vorgabe: 50)")
+    parser.add_argument("--seed-accounts", type=int, default=5,
+                        help="Personen, die bereits einen LDAP-Account haben "
+                             "(Vorgabe: 5)")
     parser.add_argument("--seed", type=int, default=SEED,
                         help="Zufallsstartwert fuer reproduzierbare Laeufe")
     args = parser.parse_args()
 
     rnd = random.Random(args.seed)
-    target_dir = Path(__file__).resolve().parent.parent / "docker" / "openldap" / "ldif"
+    repo = Path(__file__).resolve().parent.parent
+    ldif_dir = repo / "docker" / "openldap" / "ldif"
+    hr_dir = repo / "data" / "hr"
+    hr_dir.mkdir(parents=True, exist_ok=True)
 
     people = build_people(args.users, rnd)
     groups = build_groups(people, args.groups, rnd)
 
-    write_users(target_dir / "02-users.ldif", people)
-    write_groups(target_dir / "03-groups.ldif", groups)
+    seed_people = pick_seed_accounts(people, args.seed_accounts, rnd)
+    seed_uids = {p["uid"] for p in seed_people}
+    seed_groups = limit_groups_to_seeds(groups, seed_uids)
 
-    memberships = sum(len(g["members"]) for g in groups)
-    print(f"{len(people)} Benutzer  -> {target_dir / '02-users.ldif'}")
-    print(f"{len(groups)} Gruppen    -> {target_dir / '03-groups.ldif'}")
-    print(f"{memberships} Mitgliedschaften "
-          f"({memberships / len(people):.1f} je Benutzer im Schnitt)")
+    write_hr_csv(hr_dir / "HR-people.csv", people)
+    write_users(ldif_dir / "02-users.ldif", seed_people)
+    write_groups(ldif_dir / "03-groups.ldif", seed_groups)
+
+    belegt = sum(1 for g in seed_groups if g["members"])
+    print(f"HR-CSV (Quelle):      {len(people):4d} Personen"
+          f"   -> {hr_dir / 'HR-people.csv'}")
+    print(f"LDAP-Accounts (Ziel): {len(seed_people):4d} Seed-Accounts"
+          f" -> {ldif_dir / '02-users.ldif'}")
+    print(f"LDAP-Gruppen:         {len(seed_groups):4d} Gruppen"
+          f"      -> {ldif_dir / '03-groups.ldif'}")
+    print()
+    print(f"  {belegt} Gruppen haben Seed-Mitglieder, "
+          f"{len(seed_groups) - belegt} sind leer und warten auf Provisionierung.")
+    print(f"  {len(people) - len(seed_people)} Identitaeten haben noch keinen "
+          f"LDAP-Account.")
+    print()
+
+    # Verteilung der Lebenszyklus-Faelle ausgeben - so ist auf einen
+    # Blick erkennbar, ob genug Faelle fuer Joiner und Leaver dabei sind.
+    heute = STICHTAG.isoformat()
+    kuenftig  = sum(1 for p in people if p["startDate"] > heute)
+    beendet   = sum(1 for p in people if p["endDate"] and p["endDate"] < heute)
+    befristet = sum(1 for p in people if p["endDate"] and p["endDate"] >= heute)
+    unbefr    = sum(1 for p in people
+                    if not p["endDate"] and p["startDate"] <= heute)
+    print(f"  Lebenszyklus (Stichtag {heute}):")
+    print(f"    {kuenftig:3d} Eintritt steht bevor   (Joiner)")
+    print(f"    {unbefr:3d} unbefristet aktiv")
+    print(f"    {befristet:3d} befristet, noch aktiv")
+    print(f"    {beendet:3d} ausgeschieden          (Leaver)")
+    print()
+    print("  Seed-Accounts:")
+    for person in seed_people:
+        print(f"    {person['employeeNumber']}  {person['uid']:<14} "
+              f"{person['cn']:<22} {person['department']}")
 
 
 if __name__ == "__main__":

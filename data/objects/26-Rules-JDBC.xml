@@ -1,0 +1,493 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Regeln fuer den JDBC-Connector
+  ===========================================================================
+  Aufbau nach dem Muster einer produktiven Matrix42-Anbindung:
+  eine BuildMap-Regel fuer das Lesen und fuenf Operations-Regeln fuer das
+  Schreiben.
+
+  Warum ueberhaupt eigene Regeln, wo IIQ auch selbst SQL erzeugen kann:
+  Der eingebaute Weg deckt nur einfache Faelle ab. Sobald eine
+  Mehrwerttabelle im Spiel ist - hier die Rollenzuweisung in
+  IIQAccountRoles - braucht es eigenen Code. Genau das ist der Normalfall
+  in echten Projekten.
+
+  Die Regeln laufen in BeanShell. Verfuegbar sind unter anderem:
+    connection  die offene JDBC-Verbindung
+    schema      das Schema der Applikation
+    plan        der ProvisioningPlan (nur in den Operations-Regeln)
+    request     die einzelne AccountRequest
+
+  Ein Hinweis zu PostgreSQL: Die Spaltennamen sind gemischt geschrieben
+  ("IIQID", "FirstName"). PostgreSQL faltet unquotierte Bezeichner auf
+  Kleinbuchstaben, deshalb muessen sie in jedem Statement in
+  Anfuehrungszeichen stehen. Bei MSSQL waere das nicht noetig - ein
+  Unterschied, der beim Portieren solcher Regeln regelmaessig uebersehen
+  wird.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <!-- ===================================================================
+       BuildMap: ergaenzt die Rollen aus der Mehrwerttabelle
+       ===================================================================
+       Der Connector liest mit dem konfigurierten SELECT eine Zeile je
+       Account. Die Rollen stehen aber in einer zweiten Tabelle, also
+       werden sie hier nachgeladen und als mehrwertiges Attribut
+       angehaengt.
+  -->
+  <Rule language="beanshell" name="JDBC-Target BuildMap" type="JDBCBuildMap">
+    <Description>
+      Baut die Account-Map auf und ergaenzt die Rollen aus IIQAccountRoles
+      als mehrwertiges Attribut "roles".
+    </Description>
+    <Signature returnType="Map">
+      <Inputs>
+        <Argument name="result" type="java.sql.ResultSet"/>
+        <Argument name="connection" type="java.sql.Connection"/>
+        <Argument name="schema" type="sailpoint.object.Schema"/>
+      </Inputs>
+      <Returns>
+        <Argument name="map" type="java.util.Map"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.sql.PreparedStatement;
+      import java.sql.ResultSet;
+      import java.util.ArrayList;
+      import java.util.HashMap;
+      import java.util.List;
+      import java.util.Map;
+      import sailpoint.connector.JDBCConnector;
+
+      // Die Standardabbildung uebernimmt alle Spalten des SELECT.
+      Map map = JDBCConnector.buildMapFromResultSet(result, schema);
+
+      String iiqid = (String) map.get("IIQID");
+      if (iiqid == null) {
+          return map;
+      }
+
+      // Rollen aus der Mehrwerttabelle nachladen.
+      List roles = new ArrayList();
+      PreparedStatement ps = null;
+      ResultSet rs = null;
+      try {
+          ps = connection.prepareStatement(
+              "SELECT \"RoleName\" FROM targetapp.\"IIQAccountRoles\" WHERE \"IIQID\" = ?");
+          ps.setString(1, iiqid);
+          rs = ps.executeQuery();
+          while (rs.next()) {
+              roles.add(rs.getString("RoleName"));
+          }
+      } finally {
+          // Beide einzeln schliessen: schlaegt das Schliessen des
+          // ResultSet fehl, muss das Statement trotzdem freigegeben
+          // werden - sonst laufen die Cursor bei jeder Aggregation voll.
+          if (rs != null) {
+              try { rs.close(); } catch (Exception e) { }
+          }
+          if (ps != null) {
+              try { ps.close(); } catch (Exception e) { }
+          }
+      }
+
+      map.put("roles", roles);
+      return map;
+    ]]></Source>
+  </Rule>
+
+  <!-- ===================================================================
+       Create: legt einen Account an
+       =================================================================== -->
+  <Rule language="beanshell" name="JDBC-Target Create" type="JDBCProvision">
+    <Description>Legt einen Account in IIQData an und setzt die Rollen.</Description>
+    <Signature returnType="ProvisioningResult">
+      <Inputs>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="schema" type="sailpoint.object.Schema"/>
+        <Argument name="connection" type="java.sql.Connection"/>
+        <Argument name="plan" type="sailpoint.object.ProvisioningPlan"/>
+        <Argument name="request" type="sailpoint.object.ProvisioningPlan$AccountRequest"/>
+      </Inputs>
+      <Returns>
+        <Argument name="result" type="sailpoint.object.ProvisioningResult"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.sql.PreparedStatement;
+      import java.util.ArrayList;
+      import java.util.List;
+      import sailpoint.object.ProvisioningPlan;
+      import sailpoint.object.ProvisioningPlan.AttributeRequest;
+      import sailpoint.object.ProvisioningResult;
+      import sailpoint.tools.Util;
+
+      ProvisioningResult result = new ProvisioningResult();
+
+      // Werte aus dem Plan einsammeln.
+      java.util.Map werte = new java.util.HashMap();
+      List rollen = new ArrayList();
+
+      List attrs = request.getAttributeRequests();
+      if (attrs != null) {
+          for (AttributeRequest attr : attrs) {
+              String name = attr.getName();
+              Object wert = attr.getValue();
+              if ("roles".equals(name)) {
+                  if (wert instanceof List) {
+                      rollen.addAll((List) wert);
+                  } else if (wert != null) {
+                      rollen.add(wert.toString());
+                  }
+              } else if (wert != null) {
+                  werte.put(name, wert.toString());
+              }
+          }
+      }
+
+      String iiqid = (String) werte.get("IIQID");
+      if (Util.isNullOrEmpty(iiqid)) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("IIQID fehlt - der Account kann nicht angelegt werden.");
+          return result;
+      }
+
+      PreparedStatement ps = null;
+      try {
+          ps = connection.prepareStatement(
+              "INSERT INTO targetapp.\"IIQData\" " +
+              "(\"IIQID\", \"Account\", \"FirstName\", \"LastName\", \"Name\", " +
+              " \"Email\", \"Phone\", \"Position\", \"Department\", \"Costcenter\", " +
+              " \"Location\", \"EmploymentType\", \"Status\") " +
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+          ps.setString(1,  iiqid);
+          ps.setString(2,  (String) werte.get("Account"));
+          ps.setString(3,  (String) werte.get("FirstName"));
+          ps.setString(4,  (String) werte.get("LastName"));
+          ps.setString(5,  (String) werte.get("Name"));
+          ps.setString(6,  (String) werte.get("Email"));
+          ps.setString(7,  (String) werte.get("Phone"));
+          ps.setString(8,  (String) werte.get("Position"));
+          ps.setString(9,  (String) werte.get("Department"));
+          ps.setString(10, (String) werte.get("Costcenter"));
+          ps.setString(11, (String) werte.get("Location"));
+          ps.setString(12, (String) werte.get("EmploymentType"));
+          ps.setString(13, werte.get("Status") != null
+                           ? (String) werte.get("Status") : "aktiv");
+          ps.executeUpdate();
+          ps.close();
+          ps = null;
+
+          // Rollen in der Mehrwerttabelle eintragen.
+          if (!rollen.isEmpty()) {
+              ps = connection.prepareStatement(
+                  "INSERT INTO targetapp.\"IIQAccountRoles\" (\"IIQID\", \"RoleName\") " +
+                  "VALUES (?, ?)");
+              for (Object rolle : rollen) {
+                  ps.setString(1, iiqid);
+                  ps.setString(2, rolle.toString());
+                  ps.addBatch();
+              }
+              ps.executeBatch();
+          }
+
+          result.setStatus(ProvisioningResult.STATUS_COMMITTED);
+      } catch (Exception e) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Anlegen fehlgeschlagen: " + e.getMessage());
+      } finally {
+          if (ps != null) {
+              try { ps.close(); } catch (Exception e) { }
+          }
+      }
+
+      return result;
+    ]]></Source>
+  </Rule>
+
+  <!-- ===================================================================
+       Modify: aendert Attribute und Rollen
+       ===================================================================
+       Die Rollen werden einzeln hinzugefuegt oder entfernt, je nach
+       Operation der AttributeRequest. Ein pauschales Loeschen und
+       Neuschreiben waere einfacher, wuerde aber die Historie im
+       Zielsystem zerstoeren und bei jedem Refresh unnoetige
+       Aenderungen erzeugen.
+  -->
+  <Rule language="beanshell" name="JDBC-Target Modify" type="JDBCProvision">
+    <Description>Aendert einen Account in IIQData und pflegt die Rollen.</Description>
+    <Signature returnType="ProvisioningResult">
+      <Inputs>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="schema" type="sailpoint.object.Schema"/>
+        <Argument name="connection" type="java.sql.Connection"/>
+        <Argument name="plan" type="sailpoint.object.ProvisioningPlan"/>
+        <Argument name="request" type="sailpoint.object.ProvisioningPlan$AccountRequest"/>
+      </Inputs>
+      <Returns>
+        <Argument name="result" type="sailpoint.object.ProvisioningResult"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.sql.PreparedStatement;
+      import java.util.List;
+      import sailpoint.object.ProvisioningPlan;
+      import sailpoint.object.ProvisioningPlan.AttributeRequest;
+      import sailpoint.object.ProvisioningPlan.Operation;
+      import sailpoint.object.ProvisioningResult;
+      import sailpoint.tools.Util;
+
+      ProvisioningResult result = new ProvisioningResult();
+
+      String iiqid = request.getNativeIdentity();
+      if (Util.isNullOrEmpty(iiqid)) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Keine NativeIdentity - der Account ist nicht bestimmbar.");
+          return result;
+      }
+
+      PreparedStatement ps = null;
+      try {
+          List attrs = request.getAttributeRequests();
+          if (attrs != null) {
+              for (AttributeRequest attr : attrs) {
+                  String name = attr.getName();
+                  Object wert = attr.getValue();
+                  Operation op = attr.getOperation();
+
+                  if ("roles".equals(name)) {
+                      // Mehrwertiges Attribut: Rollen einzeln pflegen.
+                      List rollen = (wert instanceof List)
+                                  ? (List) wert
+                                  : java.util.Collections.singletonList(wert);
+
+                      if (Operation.Remove.equals(op)) {
+                          ps = connection.prepareStatement(
+                              "DELETE FROM targetapp.\"IIQAccountRoles\" " +
+                              "WHERE \"IIQID\" = ? AND \"RoleName\" = ?");
+                      } else {
+                          // Add und Set behandeln wir gleich: einfuegen,
+                          // falls noch nicht vorhanden.
+                          ps = connection.prepareStatement(
+                              "INSERT INTO targetapp.\"IIQAccountRoles\" " +
+                              "(\"IIQID\", \"RoleName\") VALUES (?, ?) " +
+                              "ON CONFLICT DO NOTHING");
+                      }
+                      for (Object rolle : rollen) {
+                          if (rolle == null) continue;
+                          ps.setString(1, iiqid);
+                          ps.setString(2, rolle.toString());
+                          ps.addBatch();
+                      }
+                      ps.executeBatch();
+                      ps.close();
+                      ps = null;
+
+                  } else {
+                      // Einwertiges Attribut: Spalte aktualisieren.
+                      //
+                      // Der Spaltenname stammt aus dem Schema der
+                      // Applikation, nicht aus einer Benutzereingabe -
+                      // er kann deshalb in das Statement eingesetzt
+                      // werden. Sicherheitshalber wird er trotzdem
+                      // gegen das Schema geprueft, damit eine
+                      // fehlerhafte Konfiguration nicht zu ungueltigem
+                      // SQL fuehrt.
+                      if (schema.getAttributeDefinition(name) == null) {
+                          continue;
+                      }
+                      ps = connection.prepareStatement(
+                          "UPDATE targetapp.\"IIQData\" SET \"" + name + "\" = ?, " +
+                          "\"Modified\" = CURRENT_TIMESTAMP WHERE \"IIQID\" = ?");
+                      ps.setString(1, wert != null ? wert.toString() : null);
+                      ps.setString(2, iiqid);
+                      ps.executeUpdate();
+                      ps.close();
+                      ps = null;
+                  }
+              }
+          }
+          result.setStatus(ProvisioningResult.STATUS_COMMITTED);
+      } catch (Exception e) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Aenderung fehlgeschlagen: " + e.getMessage());
+      } finally {
+          if (ps != null) {
+              try { ps.close(); } catch (Exception e) { }
+          }
+      }
+
+      return result;
+    ]]></Source>
+  </Rule>
+
+  <!-- ===================================================================
+       Delete: entfernt einen Account
+       =================================================================== -->
+  <Rule language="beanshell" name="JDBC-Target Delete" type="JDBCProvision">
+    <Description>Loescht einen Account samt seiner Rollenzuweisungen.</Description>
+    <Signature returnType="ProvisioningResult">
+      <Inputs>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="schema" type="sailpoint.object.Schema"/>
+        <Argument name="connection" type="java.sql.Connection"/>
+        <Argument name="plan" type="sailpoint.object.ProvisioningPlan"/>
+        <Argument name="request" type="sailpoint.object.ProvisioningPlan$AccountRequest"/>
+      </Inputs>
+      <Returns>
+        <Argument name="result" type="sailpoint.object.ProvisioningResult"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.sql.PreparedStatement;
+      import sailpoint.object.ProvisioningResult;
+      import sailpoint.tools.Util;
+
+      ProvisioningResult result = new ProvisioningResult();
+
+      String iiqid = request.getNativeIdentity();
+      if (Util.isNullOrEmpty(iiqid)) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Keine NativeIdentity - der Account ist nicht bestimmbar.");
+          return result;
+      }
+
+      PreparedStatement ps = null;
+      try {
+          // Zuerst die Rollen: die Tabelle hat keinen Fremdschluessel
+          // mit CASCADE, sonst blieben verwaiste Zeilen zurueck.
+          ps = connection.prepareStatement(
+              "DELETE FROM targetapp.\"IIQAccountRoles\" WHERE \"IIQID\" = ?");
+          ps.setString(1, iiqid);
+          ps.executeUpdate();
+          ps.close();
+
+          ps = connection.prepareStatement(
+              "DELETE FROM targetapp.\"IIQData\" WHERE \"IIQID\" = ?");
+          ps.setString(1, iiqid);
+          ps.executeUpdate();
+
+          result.setStatus(ProvisioningResult.STATUS_COMMITTED);
+      } catch (Exception e) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Loeschen fehlgeschlagen: " + e.getMessage());
+      } finally {
+          if (ps != null) {
+              try { ps.close(); } catch (Exception e) { }
+          }
+      }
+
+      return result;
+    ]]></Source>
+  </Rule>
+
+  <!-- ===================================================================
+       Enable und Disable: setzen nur den Status
+       ===================================================================
+       In diesem Zielsystem wird nicht geloescht, sondern deaktiviert -
+       das uebliche Vorgehen, wenn Daten aus Nachweisgruenden erhalten
+       bleiben muessen.
+  -->
+  <Rule language="beanshell" name="JDBC-Target Enable" type="JDBCProvision">
+    <Description>Setzt den Status eines Accounts auf aktiv.</Description>
+    <Signature returnType="ProvisioningResult">
+      <Inputs>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="schema" type="sailpoint.object.Schema"/>
+        <Argument name="connection" type="java.sql.Connection"/>
+        <Argument name="plan" type="sailpoint.object.ProvisioningPlan"/>
+        <Argument name="request" type="sailpoint.object.ProvisioningPlan$AccountRequest"/>
+      </Inputs>
+      <Returns>
+        <Argument name="result" type="sailpoint.object.ProvisioningResult"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.sql.PreparedStatement;
+      import sailpoint.object.ProvisioningResult;
+      import sailpoint.tools.Util;
+
+      ProvisioningResult result = new ProvisioningResult();
+      String iiqid = request.getNativeIdentity();
+
+      if (Util.isNullOrEmpty(iiqid)) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Keine NativeIdentity - der Account ist nicht bestimmbar.");
+          return result;
+      }
+
+      PreparedStatement ps = null;
+      try {
+          ps = connection.prepareStatement(
+              "UPDATE targetapp.\"IIQData\" SET \"Status\" = 'aktiv', " +
+              "\"Modified\" = CURRENT_TIMESTAMP WHERE \"IIQID\" = ?");
+          ps.setString(1, iiqid);
+          ps.executeUpdate();
+          result.setStatus(ProvisioningResult.STATUS_COMMITTED);
+      } catch (Exception e) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Aktivieren fehlgeschlagen: " + e.getMessage());
+      } finally {
+          if (ps != null) {
+              try { ps.close(); } catch (Exception e) { }
+          }
+      }
+
+      return result;
+    ]]></Source>
+  </Rule>
+
+  <Rule language="beanshell" name="JDBC-Target Disable" type="JDBCProvision">
+    <Description>Setzt den Status eines Accounts auf inaktiv.</Description>
+    <Signature returnType="ProvisioningResult">
+      <Inputs>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="schema" type="sailpoint.object.Schema"/>
+        <Argument name="connection" type="java.sql.Connection"/>
+        <Argument name="plan" type="sailpoint.object.ProvisioningPlan"/>
+        <Argument name="request" type="sailpoint.object.ProvisioningPlan$AccountRequest"/>
+      </Inputs>
+      <Returns>
+        <Argument name="result" type="sailpoint.object.ProvisioningResult"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.sql.PreparedStatement;
+      import sailpoint.object.ProvisioningResult;
+      import sailpoint.tools.Util;
+
+      ProvisioningResult result = new ProvisioningResult();
+      String iiqid = request.getNativeIdentity();
+
+      if (Util.isNullOrEmpty(iiqid)) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Keine NativeIdentity - der Account ist nicht bestimmbar.");
+          return result;
+      }
+
+      PreparedStatement ps = null;
+      try {
+          ps = connection.prepareStatement(
+              "UPDATE targetapp.\"IIQData\" SET \"Status\" = 'inaktiv', " +
+              "\"Modified\" = CURRENT_TIMESTAMP WHERE \"IIQID\" = ?");
+          ps.setString(1, iiqid);
+          ps.executeUpdate();
+          result.setStatus(ProvisioningResult.STATUS_COMMITTED);
+      } catch (Exception e) {
+          result.setStatus(ProvisioningResult.STATUS_FAILED);
+          result.addError("Deaktivieren fehlgeschlagen: " + e.getMessage());
+      } finally {
+          if (ps != null) {
+              try { ps.close(); } catch (Exception e) { }
+          }
+      }
+
+      return result;
+    ]]></Source>
+  </Rule>
+
+</sailpoint>

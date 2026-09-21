@@ -1,0 +1,396 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  LDAP-Applikation - das Zielsystem
+  ===========================================================================
+  Nicht authoritative: dieses Verzeichnis erzeugt keine Identitaeten,
+  sondern nimmt Accounts auf, die IdentityIQ dort anlegt.
+
+  Die Struktur folgt einem Export aus einer 8.5-Instanz. Abweichungen
+  davon, jeweils an unser Verzeichnis angepasst:
+
+    - Gruppen-Schema: der Export nutzte groupOfUniqueNames mit
+      uniqueMember. Unser OpenLDAP fuehrt die Gruppen als groupOfNames
+      mit member. Wuerde man das uebernehmen, faende die
+      Gruppenaggregation nichts.
+
+    - host/port: openldap:1389 statt host.example.com:389 (der
+      Container-Name im Docker-Netz, nicht localhost).
+
+    - password: im Klartext. Der Export enthielt einen verschluesselten
+      Wert (1:ACP:...), der an den Keystore der Ursprungsinstanz gebunden
+      und hier wertlos waere. Siehe CLAUDE.md zur Entscheidung gegen
+      iiq encrypt in dieser Dev-Umgebung.
+
+    - searchDNs: die 8.5-Struktur (Liste von Maps) wurde uebernommen,
+      mit ou=people als Suchbereich.
+
+  Der Platzhalter cn=placeholder,dc=example,dc=com liegt ausserhalb von
+  ou=people und faellt damit nicht in die Account-Aggregation.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <Application connector="sailpoint.connector.LDAPConnector"
+               featuresString="AUTHENTICATE, MANAGER_LOOKUP, SEARCH, PROVISIONING, SYNC_PROVISIONING, ENABLE, UNLOCK, PASSWORD, ACCOUNT_ONLY_REQUEST"
+               icon="directory2Icon"
+               name="LDAP-Target"
+               profileClass=""
+               type="LDAP">
+
+    <!--
+      Korrelation gegen die HR-Identitaeten. Bewusst ueber
+      employeeNumber und nicht ueber cn: Namen sind nicht eindeutig
+      (es gibt hier bereits zwei Personen mit gleichem Namensmuster)
+      und aendern sich bei Heirat oder Namenswechsel.
+    -->
+    <AccountCorrelationConfig>
+      <Reference class="sailpoint.object.CorrelationConfig"
+                 name="LDAP Correlation"/>
+    </AccountCorrelationConfig>
+
+    <Attributes>
+      <Map>
+        <entry key="host" value="openldap"/>
+        <entry key="port" value="1389"/>
+        <entry key="user" value="cn=admin,dc=example,dc=com"/>
+        <entry key="password" value="adminpassword"/>
+        <entry key="authorizationType" value="simple"/>
+        <entry key="useSSL">
+          <value>
+            <Boolean></Boolean>
+          </value>
+        </entry>
+
+        <entry key="authSearchAttributes">
+          <value>
+            <List>
+              <String>cn</String>
+              <String>uid</String>
+              <String>mail</String>
+            </List>
+          </value>
+        </entry>
+
+        <!-- 8.5-Struktur: Liste von Maps statt eines flachen searchDN. -->
+        <entry key="searchDNs">
+          <value>
+            <List>
+              <Map>
+                <entry key="searchDN" value="ou=people,dc=example,dc=com"/>
+                <entry key="searchScope" value="SUBTREE"/>
+                <entry key="iterateSearchFilter" value="(objectClass=inetOrgPerson)"/>
+                <entry key="groupMembershipSearchDN" value="ou=groups,dc=example,dc=com"/>
+                <entry key="groupMemberFilterString"/>
+                <entry key="primaryGroupSearchDN"/>
+              </Map>
+            </List>
+          </value>
+        </entry>
+        <entry key="searchScope" value="SUBTREE"/>
+
+        <entry key="group.searchDN" value="ou=groups,dc=example,dc=com"/>
+        <entry key="group.searchScope" value="SUBTREE"/>
+        <entry key="group.iterateSearchFilter" value="(objectClass=groupOfNames)"/>
+        <entry key="groupEntitlementAttr" value="groups"/>
+
+        <entry key="passwordAttr" value="userPassword"/>
+        <entry key="pageSize" value="100"/>
+        <entry key="deltaIterationMode" value="MODIFY_TIMESTAMP"/>
+
+        <entry key="nativeChangeDetectionAttributeScope" value="entitlements"/>
+        <entry key="nativeChangeDetectionEnabled">
+          <value>
+            <Boolean></Boolean>
+          </value>
+        </entry>
+
+        <entry key="templateApplication" value="LDAP Template"/>
+        <entry key="sysDescriptions">
+          <value>
+            <Map>
+              <entry key="en_US" value="LDAP target system for provisioning"/>
+            </Map>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+
+    <!--
+      Create-Policy: leitet die Account-Attribute aus der Identitaet ab.
+      Ohne sie laesst sich zwar aggregieren, aber kein Account anlegen -
+      IIQ wuesste nicht, welchen DN der neue Eintrag bekommen soll.
+
+      Der DN folgt dem Muster der Seed-Accounts (uid=<name>,ou=people),
+      damit provisionierte und bestehende Accounts gleich aussehen.
+    -->
+    <ProvisioningForms>
+      <Form name="Account" objectType="account" type="Create">
+        <Attributes>
+          <Map>
+            <entry key="pageTitle" value="Account"/>
+          </Map>
+        </Attributes>
+        <Section>
+          <Field displayName="con_prov_policy_ldap_user_DN"
+                 helpKey="help_con_prov_policy_ldap_user_DN"
+                 name="dn" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                // uid aus Vor- und Nachname: erster Buchstabe des
+                // Vornamens plus Nachname, kleingeschrieben - dasselbe
+                // Muster wie bei den Seed-Accounts.
+                String first = identity.getFirstname();
+                String last  = identity.getLastname();
+                String uid;
+                if (first != null && first.length() > 0 && last != null) {
+                    uid = (first.substring(0, 1) + last).toLowerCase();
+                } else {
+                    uid = identity.getName().toLowerCase();
+                }
+                uid = uid.replaceAll("[^a-z0-9]", "");
+                return "uid=" + uid + ",ou=people,dc=example,dc=com";
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field displayName="con_prov_policy_ldap_password"
+                 helpKey="help_con_prov_policy_ldap_password"
+                 name="password" required="true" type="secret">
+            <Script>
+              <Source><![CDATA[
+                // Startpasswort. In einer Dev-Umgebung fest; produktiv
+                // waere hier eine Passwortregel oder ein Zufallswert
+                // mit anschliessendem Versand richtig.
+                return "Start123!";
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field displayName="con_prov_policy_ldap_full_name"
+                 helpKey="help_con_prov_policy_ldap_full_name"
+                 name="cn" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                return identity.getDisplayName() != null
+                     ? identity.getDisplayName()
+                     : identity.getName();
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field displayName="con_prov_policy_ldap_first_name"
+                 helpKey="help_con_prov_policy_ldap_first_name"
+                 name="givenName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getFirstname();]]></Source>
+            </Script>
+          </Field>
+
+          <Field displayName="con_prov_policy_ldap_last_name"
+                 helpKey="help_con_prov_policy_ldap_last_name"
+                 name="sn" required="true" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getLastname();]]></Source>
+            </Script>
+          </Field>
+
+          <!--
+            Ohne objectClass lehnt OpenLDAP den Eintrag ab. inetOrgPerson
+            setzt organizationalPerson, person und top voraus, deshalb
+            muessen alle vier angegeben werden.
+          -->
+          <Field name="objectClass" multi="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                java.util.List classes = new java.util.ArrayList();
+                classes.add("inetOrgPerson");
+                classes.add("organizationalPerson");
+                classes.add("person");
+                classes.add("top");
+                return classes;
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="uid" type="string">
+            <Script>
+              <Source><![CDATA[
+                String first = identity.getFirstname();
+                String last  = identity.getLastname();
+                String uid;
+                if (first != null && first.length() > 0 && last != null) {
+                    uid = (first.substring(0, 1) + last).toLowerCase();
+                } else {
+                    uid = identity.getName().toLowerCase();
+                }
+                return uid.replaceAll("[^a-z0-9]", "");
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="mail" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getEmail();]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="employeeNumber" type="string">
+            <Script>
+              <Source><![CDATA[
+                // Traegt den Korrelationsschluessel gleich mit ein -
+                // sonst korrelierte der neu angelegte Account bei der
+                // naechsten Aggregation nicht zurueck.
+                return identity.getStringAttribute("employeeNumber");
+              ]]></Source>
+            </Script>
+          </Field>
+        </Section>
+      </Form>
+
+      <Form name="Create Group" objectType="group" type="Create">
+        <Attributes>
+          <Map>
+            <entry key="pageTitle" value="Create Group"/>
+          </Map>
+        </Attributes>
+        <Section>
+          <Field displayName="con_prov_policy_ldap_group_DN"
+                 helpKey="help_con_prov_policy_ldap_group_DN"
+                 name="dn" required="true" reviewRequired="true" type="string"/>
+          <Field displayName="con_prov_policy_ldap_description"
+                 helpKey="help_con_prov_policy_ldap_description"
+                 name="description" reviewRequired="true" type="string"/>
+        </Section>
+      </Form>
+
+      <Form name="Update Group" objectType="group" type="Update">
+        <Attributes>
+          <Map>
+            <entry key="pageTitle" value="Update Group"/>
+          </Map>
+        </Attributes>
+        <Section>
+          <Field displayName="con_prov_policy_ldap_owner" name="owner" type="string"/>
+          <Field displayName="con_prov_policy_ldap_common_name" name="cn" type="string"/>
+          <Field displayName="con_prov_policy_ldap_object_class" multi="true"
+                 name="objectClass" type="string"/>
+          <Field displayName="con_prov_policy_ldap_description"
+                 name="description" type="string"/>
+        </Section>
+      </Form>
+    </ProvisioningForms>
+
+    <Schemas>
+      <!--
+        Account-Schema. Gegenueber dem vollstaendigen Export auf die
+        Attribute gekuerzt, die im Verzeichnis tatsaechlich vorkommen -
+        der Export fuehrt rund 40 inetOrgPerson-Attribute auf, von denen
+        die meisten hier leer blieben.
+      -->
+      <Schema displayAttribute="cn"
+              identityAttribute="dn"
+              instanceAttribute=""
+              nativeObjectType="inetOrgPerson"
+              objectType="account">
+        <AttributeDefinition name="dn" type="string">
+          <Description>Distinguished Name</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="uid" type="string">
+          <Description>Benutzerkennung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="cn" type="string">
+          <Description>Vollstaendiger Name</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="sn" type="string">
+          <Description>Nachname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="givenName" type="string">
+          <Description>Vorname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="mail" type="string">
+          <Description>Mailadresse</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="employeeNumber" type="string">
+          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="employeeType" type="string">
+          <Description>Hierarchieebene</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="title" type="string">
+          <Description>Funktionsbezeichnung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="departmentNumber" type="string">
+          <Description>Abteilung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="ou" type="string">
+          <Description>Organisationseinheit</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="l" type="string">
+          <Description>Standort</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="telephoneNumber" type="string">
+          <Description>Telefonnummer</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="description" type="string">
+          <Description>Beschreibung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="manager" type="string">
+          <Description>DN des Vorgesetzten</Description>
+        </AttributeDefinition>
+        <AttributeDefinition multi="true" name="objectClass" type="string">
+          <Description>Objektklassen des Eintrags</Description>
+        </AttributeDefinition>
+        <AttributeDefinition entitlement="true" managed="true" multi="true"
+                             name="groups" schemaObjectType="group" type="string">
+          <Description>Gruppenmitgliedschaften - die Entitlements</Description>
+        </AttributeDefinition>
+      </Schema>
+
+      <!--
+        Gruppen-Schema. WICHTIG: groupOfNames mit member.
+
+        Der 8.5-Export nutzte groupOfUniqueNames mit uniqueMember. Das
+        passt zu Verzeichnissen, die diese Klasse fuehren - unseres nutzt
+        groupOfNames. Beide Werte muessen zusammenpassen, sonst liefert
+        die Gruppenaggregation kein Ergebnis.
+
+        GROUPS_HAVE_MEMBERS sorgt dafuer, dass IIQ die Mitgliedschaft
+        ueber die Gruppe aufloest und nicht ueber ein Attribut am Account:
+        bei groupOfNames steht die Beziehung an der Gruppe.
+      -->
+      <Schema descriptionAttribute="description"
+              displayAttribute="cn"
+              featuresString="PROVISIONING, GROUPS_HAVE_MEMBERS"
+              identityAttribute="dn"
+              instanceAttribute=""
+              nativeObjectType="groupOfNames"
+              objectType="group">
+        <AttributeDefinition name="dn" type="string">
+          <Description>Distinguished Name</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="cn" type="string">
+          <Description>Gruppenname</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="description" type="string">
+          <Description>Beschreibung der Berechtigung</Description>
+        </AttributeDefinition>
+        <AttributeDefinition name="owner" type="string">
+          <Description>Eigentuemer</Description>
+        </AttributeDefinition>
+        <Attributes>
+          <Map>
+            <entry key="groupMemberAttribute" value="member"/>
+          </Map>
+        </Attributes>
+      </Schema>
+    </Schemas>
+
+  </Application>
+
+</sailpoint>

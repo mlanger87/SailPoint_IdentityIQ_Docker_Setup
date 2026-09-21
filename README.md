@@ -111,51 +111,82 @@ Alle Dateien werden in **einem** Konsolenaufruf importiert (über ein generierte
 
 ZIP-Dateien nach `data/plugins/` legen, dann `.\scripts\iiq.ps1 import`.
 
-### LDAP-Testdaten
+### Testdaten und Systemlandschaft
 
-Das Testverzeichnis enthält **100 Benutzer** und **50 Gruppen** mit 964
-Mitgliedschaften. Die Daten sind englisch gehalten, wie in realen Projekten üblich.
+Die Umgebung bildet eine kleine, aber vollständige Landschaft ab:
 
-| | |
-|---|---|
-| Basis-DN | `dc=example,dc=com` |
-| Benutzer | `ou=people` — Anmeldung mit `uid`, Passwort überall `password` |
-| Gruppen | `ou=groups` — `objectClass: groupOfNames` |
+| System | Rolle | Inhalt |
+|---|---|---|
+| **HR-Application** | autoritative **Quelle** | 100 Personen aus `data/hr/HR-people.csv` |
+| **LDAP-Target** | **Zielsystem** | 5 Bestandskonten, 50 Gruppen als Entitlements |
+| **JDBC-Target** | **Zielsystem** | 3 Bestandskonten, 6 Rollen in `targetdb` |
+
+Die Quelle erzeugt die Identitäten; in den Zielsystemen legt IdentityIQ Konten an. Deshalb
+sind die Zielsysteme bis auf wenige Bestandskonten leer — die gibt es, damit sich auch der
+Korrelationsfall zeigen lässt (bestehendes Konto trifft auf neue Identität) und nicht nur
+das Anlegen.
+
+#### Die HR-Quelle
+
+`data/hr/HR-people.csv`, semikolongetrennt, mit Kopfzeile. Sie wird per Bind-Mount nach
+`/data/hr/` im Container gereicht — **eine Änderung ist sofort wirksam**, es genügt, die
+Aggregation erneut zu starten.
 
 Die Struktur ist auf IdentityIQ-Übungen hin angelegt:
 
-- **`employeeNumber`** (1001–1100) als eindeutiger Schlüssel für die Korrelationsregel
-- **`manager`** bildet eine dreistufige Hierarchie ab (Department Head → Team Lead →
-  Staff) — nötig, damit sich Manager-Zertifizierungen testen lassen
-- **`departmentNumber`**, **`l`**, **`employeeType`** als Merkmale für die Rollenzuordnung
+- **`employeeNumber`** (1001–1100) als stabiler Schlüssel für die Korrelation
+- **`managerEmployeeNumber`** bildet eine dreistufige Hierarchie ab (Department Head →
+  Team Lead → Staff) — nötig, damit sich Manager-Zertifizierungen testen lassen
+- **`department`**, **`location`**, **`employeeType`**, **`status`** als Merkmale für die
+  automatische Rollenzuweisung
 - Acht Abteilungen ungleich besetzt (Sales 22, IT 20 … Legal 4), drei Standorte
 
-Die Gruppen zerfallen in vier Arten:
+#### Das LDAP-Zielsystem
+
+Basis-DN `dc=example,dc=com`, Konten unter `ou=people`, Gruppen unter `ou=groups`
+(`groupOfNames`). Passwort der Bestandskonten: `password`.
+
+Die 50 Gruppen sind die Entitlements, die IIQ zuweisen kann:
 
 | Präfix | Beispiel | Zweck |
 |---|---|---|
-| `dept-*` | `dept-it` | Abteilung, vollständige Mitgliedschaft |
+| `dept-*` | `dept-it` | Abteilung |
 | `site-*` | `site-london` | Standort |
 | `org-*` | `org-managers` | organisatorische Sammelgruppe |
-| `app-*` | `app-database-admin` | Anwendungsberechtigung (Entitlement) |
+| `app-*` | `app-database-admin` | Anwendungsberechtigung |
 
-Die `app-*`-Gruppen sind bewusst **ungleich groß** (2 bis 55 Mitglieder) und teilweise an
-Abteilungen gebunden — die Rechtsabteilung bekommt keinen Build-Server-Zugriff. Damit
-liefert eine Rollenmodellierung plausible Ergebnisse statt Rauschen.
+Die `app-*`-Gruppen sind bewusst **ungleich groß** und teilweise an Abteilungen gebunden —
+die Rechtsabteilung bekommt keinen Build-Server-Zugriff. Damit liefert eine
+Rollenmodellierung plausible Ergebnisse statt Rauschen.
+
+Gruppen ohne Mitglied tragen `cn=placeholder` als `member`: `groupOfNames` verlangt
+mindestens eines, sonst lehnt OpenLDAP den Eintrag ab.
+
+#### Das JDBC-Zielsystem
+
+Die Datenbank `targetdb` im selben PostgreSQL-Container, Schema `targetapp`:
+
+- `IIQData` — eine Zeile je Konto, `IIQID` ist der Korrelationsschlüssel
+- `IIQRoles` / `IIQAccountRoles` — Rollen und ihre Zuweisung
+
+Anzusehen in DBGate. Die Provisionierung läuft über fünf BeanShell-Regeln
+(`data/objects/26-Rules-JDBC.xml`), weil die Rollen in einer Mehrwerttabelle liegen — das
+deckt der eingebaute SQL-Weg nicht ab.
 
 #### Datenmenge ändern
 
-Die LDIF-Dateien werden von einem Generator erzeugt:
+Alle drei Dateien stammen aus **einem** Generator. Das ist wichtig: Die `employeeNumber`
+der LDAP-Bestandskonten muss zu einer Zeile der CSV passen, sonst korreliert nichts.
 
 ```powershell
-python scripts\generate-ldif.py --users 250 --groups 80
+python scripts\generate-testdata.py --users 250 --groups 80 --seed-accounts 10
 ```
 
 Ein fester Zufallsstartwert sorgt dafür, dass derselbe Aufruf immer dieselben Daten
-liefert. Die Dateien in `docker/openldap/ldif/` sollten **nicht** von Hand bearbeitet
-werden — der nächste Generatorlauf überschreibt sie.
+liefert. Die erzeugten Dateien sollten **nicht** von Hand bearbeitet werden — der nächste
+Lauf überschreibt sie.
 
-Danach das Verzeichnis neu aufbauen. Die LDIFs werden nur bei **leerem** Datenverzeichnis
+Die CSV wirkt sofort. Die LDIFs werden dagegen nur bei **leerem** Datenverzeichnis
 eingelesen, ein Neustart genügt also nicht:
 
 ```powershell
@@ -166,6 +197,24 @@ docker compose up -d openldap
 
 Für einzelne Ergänzungen im laufenden Betrieb ist die LDAP-UI auf http://localhost:5080
 der schnellere Weg.
+
+#### Die Aufgaben starten
+
+Nach dem ersten Start sind die Objekte importiert, aber noch keine Daten eingelesen. Unter
+**Setup > Tasks** in dieser Reihenfolge starten:
+
+1. **HR Aggregation** — erzeugt die 100 Identitäten
+2. **LDAP Group Aggregation** — lädt die Gruppen als Entitlements
+3. **LDAP Account Aggregation** — korreliert die Bestandskonten
+4. **JDBC Aggregation** — dasselbe für das zweite Zielsystem
+5. **Refresh Identity Cube** — wertet die Rollen aus und baut die Hierarchie auf
+
+Die Gruppen **vor** den Konten zu laden ist kein Zufall: Sonst verweisen die Entitlements
+auf noch unbekannte Gruppen und bleiben ohne Anzeigenamen.
+
+Der fünfte Schritt provisioniert: Wer über eine Rolle ein Entitlement bekommt und noch
+kein Konto hat, für den legt IIQ eines an. Das ist der Joiner-Durchlauf.
+
 
 ### Zertifikate hinterlegen
 

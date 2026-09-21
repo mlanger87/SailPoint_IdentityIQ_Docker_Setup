@@ -1,0 +1,270 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Lifecycle-Events: Joiner und Leaver
+  ===========================================================================
+  Die Kette im Ueberblick:
+
+      HR-CSV (startDate/endDate)
+          -> Regel "HR Set Inactive" berechnet das Attribut inactive
+              -> IdentityTrigger erkennt den Wechsel
+                  -> Workflow provisioniert oder deaktiviert
+
+  Die Struktur folgt den mitgelieferten Triggern "Joiner" und "Leaver"
+  (nachzusehen mit: get IdentityTrigger Leaver). Wichtig daran:
+
+    - Der Workflow wird ueber das ATTRIBUT handler und die
+      HandlerParameters referenziert, nicht ueber ein Element. Ein
+      <Handler>-Element gibt es nicht; die DTD listet nur
+      AssignedScope, Description, Owner, HandlerParameters,
+      PendingWorkflow, TriggerRule und Selector.
+
+    - type="AttributeChange" mit oldValueFilter und newValueFilter
+      reicht aus. Eine eigene TriggerRule waere nur noetig, wenn die
+      Bedingung komplexer ist als ein Attributwechsel.
+
+  Abweichung vom mitgelieferten Joiner: Jener nutzt type="Create",
+  feuert also beim Anlegen der Identitaet. Das passt hier nicht - bei
+  einem kuenftigen Eintrittsdatum entsteht die Identitaet lange vor dem
+  ersten Arbeitstag. Ausgeloest wird deshalb ueber denselben
+  Attributwechsel wie beim Leaver, nur in die andere Richtung.
+
+  Die mitgelieferten Trigger bleiben unangetastet und deaktiviert.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <!-- ===================================================================
+       Joiner: inactive wechselt von true auf false
+       ===================================================================
+       Tritt ein, sobald das Eintrittsdatum erreicht ist - die Regel
+       "HR Set Inactive" gibt dann false zurueck.
+  -->
+  <IdentityTrigger name="HR Joiner"
+                   attributeName="inactive"
+                   oldValueFilter="true"
+                   newValueFilter="false"
+                   type="AttributeChange"
+                   handler="sailpoint.api.WorkflowTriggerHandler"
+                   disabled="false">
+    <Description>
+      Startet den Joiner-Workflow, sobald das Eintrittsdatum erreicht ist
+      und die Identitaet dadurch aktiv wird.
+    </Description>
+    <HandlerParameters>
+      <Attributes>
+        <Map>
+          <entry key="workflow" value="HR Joiner Workflow"/>
+        </Map>
+      </Attributes>
+    </HandlerParameters>
+  </IdentityTrigger>
+
+  <Workflow explicitTransitions="true"
+            name="HR Joiner Workflow"
+            type="IdentityLifecycle">
+    <Description>
+      Legt fuer eine neu eingetretene Identitaet die Konten in den
+      Zielsystemen an - abgeleitet aus den zugewiesenen Rollen.
+    </Description>
+    <Variable input="true" name="identityName">
+      <Description>Name der ausloesenden Identitaet</Description>
+    </Variable>
+    <Variable input="true" name="trigger"/>
+    <Variable input="true" name="identity"/>
+    <Variable input="true" name="previousIdentity"/>
+    <Variable initializer="false" name="trace"/>
+
+    <Step icon="Start" name="Start" posX="28" posY="10">
+      <Transition to="Refresh"/>
+    </Step>
+
+    <!--
+      Der Plan wird nicht selbst gebaut: Die Rollenzuweisung ergibt sich
+      aus den Selectors der Bundles, und refreshIdentity leitet daraus
+      die noetigen Kontoanlagen ab. Ein handgeschriebener Plan muesste
+      dieselbe Logik doppeln und liefe bei jeder Rollenaenderung aus dem
+      Tritt.
+    -->
+    <Step action="call:refreshIdentity"
+          icon="Task"
+          name="Refresh"
+          posX="130"
+          posY="10">
+      <Description>
+        Wertet die Rollen aus und provisioniert, was fehlt.
+      </Description>
+      <Arg name="identityName" value="ref:identityName"/>
+      <Arg name="correlateEntitlements" value="true"/>
+      <Arg name="provision" value="true"/>
+      <Arg name="refreshAssignedRoles" value="true"/>
+      <Transition to="Protokoll"/>
+    </Step>
+
+    <Step icon="Message" name="Protokoll" posX="240" posY="10">
+      <Script>
+        <Source><![CDATA[
+          import org.apache.commons.logging.LogFactory;
+          LogFactory.getLog("iiq.lifecycle").info(
+              "Joiner ausgefuehrt fuer: " + identityName);
+        ]]></Source>
+      </Script>
+      <Transition to="Ende"/>
+    </Step>
+
+    <Step icon="Stop" name="Ende" posX="350" posY="10"/>
+  </Workflow>
+
+  <!-- ===================================================================
+       Leaver: inactive wechselt von false auf true
+       =================================================================== -->
+  <IdentityTrigger name="HR Leaver"
+                   attributeName="inactive"
+                   oldValueFilter="false"
+                   newValueFilter="true"
+                   type="AttributeChange"
+                   handler="sailpoint.api.WorkflowTriggerHandler"
+                   disabled="false">
+    <Description>
+      Startet den Leaver-Workflow, sobald das Austrittsdatum erreicht ist.
+    </Description>
+    <!--
+      Abgrenzung zum Joiner: Beide Gruppen wechseln inactive von false
+      auf true - eine Identitaet mit kuenftigem Eintrittsdatum wird
+      zunaechst aktiv angelegt und dann gesperrt. Ohne diesen Selector
+      liefe der Leaver-Workflow auch fuer jeden kuenftigen Eintritt an
+      (gemessen: 10 Laeufe bei 4 echten Leavern).
+
+      Das Austrittsdatum unterscheidet die beiden Faelle eindeutig.
+    -->
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression>
+          <!--
+            negative="true" mit leerem value bedeutet: endDate ist
+            NICHT leer. Gueltige type-Werte laut DTD: Entitlement,
+            Permission, TargetPermission, IdentityAttribute,
+            RoleAttribute, EntitlementAttribute.
+          -->
+          <MatchTerm name="endDate" type="IdentityAttribute"
+                     negative="true" value=""/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <HandlerParameters>
+      <Attributes>
+        <Map>
+          <entry key="workflow" value="HR Leaver Workflow"/>
+        </Map>
+      </Attributes>
+    </HandlerParameters>
+  </IdentityTrigger>
+
+  <Workflow explicitTransitions="true"
+            name="HR Leaver Workflow"
+            type="IdentityLifecycle">
+    <Description>
+      Deaktiviert die Konten einer ausgeschiedenen Identitaet in allen
+      Zielsystemen.
+    </Description>
+    <Variable input="true" name="identityName"/>
+    <Variable input="true" name="trigger"/>
+    <Variable input="true" name="identity"/>
+    <Variable input="true" name="previousIdentity"/>
+    <Variable initializer="false" name="trace"/>
+    <Variable name="plan"/>
+
+    <Step icon="Start" name="Start" posX="28" posY="10">
+      <Transition to="Plan bauen"/>
+    </Step>
+
+    <!--
+      Hier wird der Plan bewusst selbst gebaut: Es geht um Deaktivieren,
+      nicht um Loeschen. Ein Refresh wuerde die Konten entfernen, sobald
+      die Rollen wegfallen - die Daten sollen aber aus Nachweisgruenden
+      erhalten bleiben.
+
+      Abgrenzung zum Joiner-Fall: Der Trigger feuert auch, wenn jemand
+      mit kuenftigem Eintrittsdatum angelegt wird (inactive=true). Ohne
+      Austrittsdatum darf dann nichts deaktiviert werden.
+    -->
+    <Step icon="Task" name="Plan bauen" posX="130" posY="10" resultVariable="plan">
+      <Script>
+        <Source><![CDATA[
+          import java.util.List;
+          import sailpoint.object.Identity;
+          import sailpoint.object.Link;
+          import sailpoint.object.ProvisioningPlan;
+          import sailpoint.object.ProvisioningPlan.AccountRequest;
+          import sailpoint.tools.Util;
+
+          Identity ident = context.getObjectByName(Identity.class, identityName);
+          if (ident == null) {
+              return null;
+          }
+
+          // Ohne Austrittsdatum liegt kein Austritt vor, sondern ein
+          // noch nicht erreichter Eintritt.
+          String ende = ident.getStringAttribute("endDate");
+          if (Util.isNullOrEmpty(ende)) {
+              return null;
+          }
+
+          List links = ident.getLinks();
+          if (links == null || links.isEmpty()) {
+              return null;
+          }
+
+          ProvisioningPlan p = new ProvisioningPlan();
+          p.setIdentity(ident);
+
+          for (Link link : links) {
+              String app = link.getApplicationName();
+
+              // Die HR-Quelle ist kein Zielsystem - dort wird nichts
+              // veraendert.
+              if ("HR-Application".equals(app)) {
+                  continue;
+              }
+
+              AccountRequest req = new AccountRequest();
+              req.setApplication(app);
+              req.setNativeIdentity(link.getNativeIdentity());
+              req.setOperation(AccountRequest.Operation.Disable);
+              p.add(req);
+          }
+
+          return (p.getAccountRequests() != null
+                  && !p.getAccountRequests().isEmpty()) ? p : null;
+        ]]></Source>
+      </Script>
+      <Transition to="Provisionieren" when="script:return plan != null"/>
+      <Transition to="Protokoll"/>
+    </Step>
+
+    <Step action="call:provisionProject"
+          icon="Task"
+          name="Provisionieren"
+          posX="240"
+          posY="10">
+      <Arg name="plan" value="ref:plan"/>
+      <Arg name="identityName" value="ref:identityName"/>
+      <Transition to="Protokoll"/>
+    </Step>
+
+    <Step icon="Message" name="Protokoll" posX="350" posY="10">
+      <Script>
+        <Source><![CDATA[
+          import org.apache.commons.logging.LogFactory;
+          LogFactory.getLog("iiq.lifecycle").info(
+              "Leaver ausgefuehrt fuer: " + identityName);
+        ]]></Source>
+      </Script>
+      <Transition to="Ende"/>
+    </Step>
+
+    <Step icon="Stop" name="Ende" posX="460" posY="10"/>
+  </Workflow>
+
+</sailpoint>

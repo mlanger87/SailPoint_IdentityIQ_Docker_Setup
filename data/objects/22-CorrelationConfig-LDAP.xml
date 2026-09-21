@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Korrelationsregel fuer das LDAP-Zielsystem
+  ===========================================================================
+  Ordnet einen LDAP-Account der passenden Identitaet zu.
+
+  Die Zuordnung laeuft ueber employeeNumber: links das Attribut der
+  Identitaet, rechts das gleichnamige Attribut des Accounts.
+
+  Referenzprojekt C korrelierte stattdessen ueber cn - also ueber den
+  Namen. Das ist fragil: Namen sind nicht eindeutig und aendern sich.
+  Die Personalnummer ist stabil und kommt bei uns aus derselben Quelle
+  wie die CSV, die Zuordnung kann also nicht auseinanderlaufen.
+
+  Greift die Korrelation nicht, legt IIQ fuer den Account eine eigene
+  Identitaet an - erkennbar an Identitaeten ohne HR-Link.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <CorrelationConfig name="LDAP Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="employeeNumber"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
+
+</sailpoint>

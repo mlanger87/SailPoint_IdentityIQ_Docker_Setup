@@ -89,6 +89,11 @@ services:
       - ./data/objects:/data/objects:ro
       - ./data/plugins:/data/plugins:ro
       - ./data/certs:/data/certs:ro
+      # Autoritative HR-Quelle fuer den DelimitedFile-Connector.
+      # Bewusst schreibbar: so laesst sich die Datei auch aus dem
+      # Container heraus ergaenzen. Der Pfad hier ist der, der in der
+      # Application unter "file" steht.
+      - ./data/hr:/data/hr
     depends_on:
       postgres:
         condition: service_healthy
@@ -133,6 +138,11 @@ services:
       - ./data/objects:/data/objects:ro
       - ./data/plugins:/data/plugins:ro
       - ./data/certs:/data/certs:ro
+      # Autoritative HR-Quelle fuer den DelimitedFile-Connector.
+      # Bewusst schreibbar: so laesst sich die Datei auch aus dem
+      # Container heraus ergaenzen. Der Pfad hier ist der, der in der
+      # Application unter "file" steht.
+      - ./data/hr:/data/hr
     depends_on:
       postgres:
         condition: service_healthy
@@ -260,7 +270,7 @@ services:
     platform: linux/amd64
     container_name: iiq-dbgate
     environment:
-      CONNECTIONS: iiq,plugin,ah
+      CONNECTIONS: iiq,plugin,ah,target
 
       LABEL_iiq: IdentityIQ
       SERVER_iiq: postgres
@@ -285,6 +295,18 @@ services:
       PASSWORD_ah: ${IIQ_AH_DB_PASSWORD:-identityiqah}
       DATABASE_ah: identityiqah
       ENGINE_ah: postgres@dbgate-plugin-postgres
+
+      # Die Zieldatenbank des JDBC-Connectors. Hier laesst sich
+      # nachvollziehen, was IIQ beim Provisionieren tatsaechlich
+      # schreibt - Tabellen IIQData und IIQAccountRoles im Schema
+      # targetapp.
+      LABEL_target: JDBC-Zielsystem
+      SERVER_target: postgres
+      PORT_target: "5432"
+      USER_target: targetapp
+      PASSWORD_target: targetapp
+      DATABASE_target: targetdb
+      ENGINE_target: postgres@dbgate-plugin-postgres
     ports:
       - "${DBGATE_PORT:-5050}:3000"
     volumes:
