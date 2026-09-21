@@ -86,6 +86,26 @@ Der Hibernate-Dialekt ist `sailpoint.persistence.PostgreSQL10Dialect` (die Klass
 **Die Plugin-Datenbank hat absichtlich 0 Tabellen.** Sie enthält nur Schema und Rechte;
 die Tabellen legt jedes Plugin bei seiner Installation selbst an. Das ist kein Fehler.
 
+**Die Tabellen liegen nicht in `public`.** Die DDL legt sie in ein gleichnamiges Schema
+(`identityiq` bzw. `identityiqah`). Der PostgreSQL-Default für `search_path` ist aber
+`"$user", public`.
+
+Für IIQ selbst geht das gerade noch gut, weil sich `"$user"` zum Benutzernamen auflöst und
+dieser zufällig genauso heißt wie das Schema. Für alle anderen Zugriffe — Adminer, `psql`
+als `postgres`, eigene Auswertungen — ist das Schema dagegen nicht im Suchpfad:
+
+```sql
+SELECT * FROM spt_identity;             -- relation "spt_identity" does not exist
+SELECT * FROM identityiq.spt_identity;  -- funktioniert
+```
+
+Deshalb setzt `docker/postgres/02-search-path.sql` den Suchpfad dauerhaft pro Rolle und
+Datenbank (`ALTER ROLE ... IN DATABASE ... SET search_path`). Danach funktionieren
+Abfragen ohne Schema-Präfix.
+
+In Adminer zeigt die Datenbankübersicht bei „Tables" und „Size" nur `?` — das ist Absicht,
+die Werte werden erst auf Klick („Compute") ermittelt.
+
 ### Größenverhältnisse
 
 | | |

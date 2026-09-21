@@ -188,6 +188,24 @@ docker compose logs iiq-init
 
 Der Init-Container muss sich mit Code 0 beenden. `iiq` startet sonst gar nicht erst.
 
+### Adminer zeigt keine Tabellen
+
+Zwei mögliche Ursachen:
+
+**Auf der Übersichtsseite** („Select database") steht bei „Tables" und „Size" nur `?`.
+Das ist normal — Adminer zählt diese Werte erst auf Klick („Compute").
+
+**Nach dem Öffnen einer Datenbank** ist die Liste leer: Die IIQ-Tabellen liegen nicht im
+Standard-Schema `public`, sondern in einem gleichnamigen Schema `identityiq`. Oben in der
+Schema-Auswahl von `public` auf `identityiq` umstellen — oder direkt aufrufen:
+
+```
+http://localhost:5050/?pgsql=postgres&username=postgres&db=identityiq&ns=identityiq
+```
+
+Für Abfragen ist das nicht nötig: Der `search_path` ist so gesetzt, dass
+`SELECT * FROM spt_identity` auch ohne Präfix funktioniert.
+
 ### Port bereits belegt
 
 Die betreffende Zeile in der `.env` ändern, zum Beispiel:

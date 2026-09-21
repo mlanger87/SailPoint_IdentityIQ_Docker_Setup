@@ -34,10 +34,16 @@ echo "[iiq-tuning] Haenge IdentityIQ-Tuning an ${PG_CONF} an."
     echo "# --- IIQ-TUNING-END ---"
 } >> "${PG_CONF}"
 
-# Die Einstellungen sollen schon fuer die nachfolgende Schema-DDL gelten.
-# Ein Reload genuegt fuer alle Parameter ausser max_connections und
-# shared_buffers - die greifen erst beim endgueltigen Serverstart, der
-# ohnehin direkt nach der Initialisierung erfolgt.
-pg_ctl reload -D "${PGDATA}" >/dev/null 2>&1 || true
-
-echo "[iiq-tuning] Fertig."
+# Bewusst KEIN "pg_ctl reload" an dieser Stelle.
+#
+# Parameter wie max_connections, shared_buffers und wal_buffers lassen sich
+# nur beim Serverstart aendern. Ein Reload waehrend der Initialisierung
+# wuerde deshalb Meldungen wie
+#   "parameter ... cannot be changed without restarting the server"
+#   "configuration file ... contains errors"
+# ins Log schreiben - was nach einem Fehler aussieht, aber keiner ist.
+#
+# Der Entrypoint des Postgres-Images faehrt den temporaeren Init-Server
+# ohnehin herunter und startet den eigentlichen Server neu. Spaetestens
+# dann greift die gesamte Konfiguration.
+echo "[iiq-tuning] Fertig - wirksam ab dem naechsten Serverstart."

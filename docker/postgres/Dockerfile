@@ -85,6 +85,12 @@ FROM postgres:17-bookworm
 COPY --from=ddl /work/extracted/01-create-identityiq.sql \
                 /docker-entrypoint-initdb.d/01-create-identityiq.sql
 
+# Setzt den search_path auf die IIQ-Schemata, damit Tabellen auch ohne
+# Schema-Praefix gefunden werden (Adminer, psql, eigene Auswertungen).
+# Muss NACH der Schema-DDL laufen - daher Praefix 02.
+COPY docker/postgres/02-search-path.sql \
+     /docker-entrypoint-initdb.d/02-search-path.sql
+
 # Tuning fuer IdentityIQ.
 #
 # "include_dir" laesst sich NICHT per "postgres -c" setzen (es ist nur in
