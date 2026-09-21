@@ -49,6 +49,7 @@ try {
             Write-Host "  IdentityIQ   http://localhost:8080/identityiq   (spadmin / admin)"
             Write-Host "  Mailpit      http://localhost:8025"
             Write-Host "  DBGate       http://localhost:5050"
+            Write-Host "  LDAP-UI      http://localhost:5080"
         }
 
         'psql' {

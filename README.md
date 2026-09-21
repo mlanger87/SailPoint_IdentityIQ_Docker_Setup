@@ -63,6 +63,7 @@ Spätere Starts dauern etwa eine Minute.
 | **IdentityIQ** | http://localhost:8080/identityiq | `spadmin` / `admin` |
 | **Mailpit** (Mailfang) | http://localhost:8025 | — |
 | **DBGate** (Datenbank) | http://localhost:5050 | — (drei Verbindungen sind vorkonfiguriert) |
+| **LDAP-UI** (Verzeichnis) | http://localhost:5080 | `admin` / `adminpassword` |
 | PostgreSQL | `localhost:5432` | `identityiq` / `identityiq` |
 | OpenLDAP | `localhost:1389` | `cn=admin,dc=example,dc=com` / `adminpassword` |
 
@@ -157,6 +158,7 @@ Tomcat wartet **nicht** auf den Debugger, startet also auch ohne IDE normal.
 | `iiq` | Tomcat 9 mit IdentityIQ, startet erst nach `iiq-init` |
 | `mailpit` | fängt alle Mails ab |
 | `openldap` | Testverzeichnis mit vier Benutzern und vier Gruppen |
+| `ldap-ui` | Browser für das Testverzeichnis |
 | `dbgate` | Datenbank-Oberfläche mit SQL-Editor |
 
 Die Trennung von `iiq-init` und `iiq` sorgt dafür, dass der Import genau einmal läuft.

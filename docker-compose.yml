@@ -203,6 +203,42 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
+  # LDAP-UI - Browser fuer das Testverzeichnis
+  #
+  # Zur Werkzeugwahl:
+  #   - phpLDAPadmin (in drei der vier Referenzprojekte) ist optisch und
+  #     technisch veraltet; das osixia-Image wird seit Jahren nicht mehr
+  #     gepflegt.
+  #   - LLDAP waere kein Browser, sondern ein eigener LDAP-Server mit
+  #     Weboberflaeche - er wuerde OpenLDAP ersetzen statt ergaenzen.
+  #   - dnknth/ldap-ui: schlanke Vue-Oberflaeche auf Alpine-Basis, zeigt
+  #     den echten Verzeichnisbaum, kann Eintraege anlegen, aendern und
+  #     loeschen, beherrscht LDAP-Suchfilter und Schema-Ansicht.
+  #
+  # Angemeldet wird sich mit dem Admin-DN des Verzeichnisses:
+  #     cn=admin,dc=example,dc=com  /  adminpassword
+  # -------------------------------------------------------------------------
+  ldap-ui:
+    image: dnknth/ldap-ui:0.15.4
+    platform: linux/amd64
+    container_name: iiq-ldap-ui
+    environment:
+      LDAP_URL: ldap://openldap:1389
+      BASE_DN: ${LDAP_ROOT:-dc=example,dc=com}
+      # Bindet den Anmeldenamen an den Admin-DN. Ohne das muesste man den
+      # vollstaendigen DN jedes Mal eintippen.
+      BIND_PATTERN: cn=%s,${LDAP_ROOT:-dc=example,dc=com}
+      LOGIN_ATTR: cn
+      # Passwoerter werden beim Anlegen/Aendern mit SSHA gehasht.
+      PASSWD_HASH: SSHA
+    ports:
+      - "${LDAP_UI_PORT:-5080}:5000"
+    depends_on:
+      - openldap
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # -------------------------------------------------------------------------
   # DBGate - Datenbank-Oberflaeche
   #
   # Zur Werkzeugwahl:

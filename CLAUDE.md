@@ -226,6 +226,14 @@ also nichts manuell angelegt werden.
 Zwischenzeitlich war Adminer im Einsatz — technisch einwandfrei, optisch aber sehr
 altbacken.
 
+Als LDAP-Browser dient **`dnknth/ldap-ui`** (Vue auf Alpine, `amd64` zuerst im Manifest).
+phpLDAPadmin — in drei der vier Referenzprojekte im Einsatz — ist veraltet und das
+`osixia`-Image seit Jahren ungepflegt. **LLDAP** wäre kein Browser, sondern ein eigener
+LDAP-Server mit Weboberfläche und würde OpenLDAP ersetzen statt ergänzen.
+
+Anmeldung erfolgt über `BIND_PATTERN=cn=%s,<BASE_DN>`, man gibt also nur `admin` ein statt
+des vollständigen DN.
+
 ### Nach einem Umzug des Docker-Datenverzeichnisses
 
 Ein Verschieben des Docker-Data-Root von `C:` nach `E:` hat Images und Volumes hier
