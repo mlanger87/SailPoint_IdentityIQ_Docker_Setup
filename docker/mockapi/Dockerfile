@@ -1,18 +1,17 @@
 # ===========================================================================
-# Mock-REST-API als Zielsystem fuer den Web-Services-Connector
+# Mock REST API as target system for the Web Services connector
 # ===========================================================================
-# Bewusst ohne Framework: Die Standardbibliothek reicht fuer eine
-# Mock-API vollkommen aus. Das spart eine Abhaengigkeitsverwaltung und
-# haelt das Image bei rund 50 MB - ein Flask- oder FastAPI-Image waere
-# ein Vielfaches davon, ohne hier etwas beizutragen.
+# Deliberately no framework: the standard library is entirely sufficient
+# for a mock API. Saves dependency management and keeps the image at
+# ~50 MB - a Flask or FastAPI image would be several times that without
+# contributing anything here.
 #
-# Die Daten kommen zur Laufzeit aus der HR-CSV (Bind-Mount), damit sie
-# zu den anderen Zielsystemen passen.
+# Data comes at runtime from the HR CSV (bind mount) so it matches the
+# other target systems.
 # ===========================================================================
 FROM python:3.13-alpine
 
-# Nicht als root laufen lassen - dieselbe Ueberlegung wie beim
-# IIQ-Container.
+# Do not run as root - same reasoning as for the IIQ container.
 RUN adduser -D -u 1000 mockapi
 
 WORKDIR /app
@@ -22,8 +21,8 @@ USER 1000:1000
 
 EXPOSE 8000
 
-# Der Health-Endpunkt kommt ohne Token aus, damit der Healthcheck nicht
-# am Token haengt.
+# The health endpoint needs no token, so the healthcheck does not depend
+# on it.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; \
 sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3).status==200 else 1)"

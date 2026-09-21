@@ -1,22 +1,21 @@
 # ===========================================================================
-# Build-Kontext klein halten.
+# Keep the build context small.
 #
-# Ohne diese Datei wuerde Docker den gesamten Projektordner an den Daemon
-# senden - inklusive der Referenzprojekte und des .git-Verzeichnisses.
-# Das Installationspaket (770 MB) wird bewusst NICHT ausgeschlossen, da
-# die Dockerfiles es brauchen.
+# Without this file Docker would send the entire project folder to the
+# daemon - including the reference projects and the .git directory.
+# The installation package (770 MB) is deliberately NOT excluded; the
+# Dockerfiles need it.
 # ===========================================================================
 
-# Alles ausschliessen ...
+# Exclude everything ...
 *
 
-# ... und gezielt wieder hereinnehmen, was die Builds benoetigen.
+# ... and whitelist what the builds need.
 !docker/
 !installer/*.zip
 !installer/*.jar
 
-# data/ bleibt bewusst DRAUSSEN: Kein Dockerfile kopiert daraus, alles
-# laeuft ueber Bind-Mounts. Waere es im Kontext, wuerde jede Aenderung
-# an einer XML-Datei in data/objects den Kontext-Hash aendern und die
-# Builds unnoetig anstossen - bei Plugin-ZIPs zusaetzlich viel
-# Uebertragung an den Daemon.
+# data/ stays OUT on purpose: no Dockerfile copies from it, everything
+# goes through bind mounts. In the context, every change to an XML file
+# in data/objects would alter the context hash and needlessly trigger
+# the builds - plus a lot of transfer to the daemon for plugin ZIPs.

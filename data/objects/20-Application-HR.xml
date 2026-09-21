@@ -2,26 +2,33 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  HR-Applikation - die autoritative Quelle
+  HR application: the authoritative source
   ===========================================================================
-  Liest data/hr/HR-people.csv ueber den DelimitedFileConnector und erzeugt
-  daraus die Identitaeten in IdentityIQ.
+  Reads data/hr/HR-people.csv through the DelimitedFileConnector and
+  creates the identities in IdentityIQ from it.
 
-  Der Pfad unter "file" ist der Pfad IM CONTAINER. Der Connector laedt
-  nichts hoch, sondern oeffnet eine Datei im Dateisystem; die CSV wird
-  ueber einen Bind-Mount aus data/hr/ bereitgestellt. Eine Aenderung an
-  der Datei ist damit sofort wirksam - es genuegt, die Aggregation
-  erneut zu starten.
+  The path under "file" is the path INSIDE THE CONTAINER. The connector
+  does not upload anything; it opens a file on the filesystem, and the
+  CSV is provided through a bind mount from data/hr/. A change to the
+  file is therefore effective immediately; just re-run the aggregation.
 
-  Die Struktur folgt einem Export aus einer 8.5-Instanz. Nicht uebernommen
-  wurden:
-    - id/created-Attribute: die vergibt IIQ beim Import selbst
-    - PassphraseForPrivateKey: verschluesselt und an den Keystore der
-      Ursprungsinstanz gebunden, hier also wertlos
-    - fileEncoding="csv": das ist ein Artefakt der Oberflaeche, an dieser
-      Stelle gehoert ein Encoding hin
+  The structure follows an export from an 8.5 instance. Not carried over:
+    - id/created attributes: IIQ assigns them itself on import
+    - PassphraseForPrivateKey: encrypted and bound to the keystore of the
+      source instance, hence worthless here
+    - fileEncoding="csv": an artefact of the UI, an encoding belongs here
 
-  Der Trennzeichen-Eintrag ist ";" - passend zur erzeugten CSV.
+  The delimiter entry is ";" to match the generated CSV.
+
+  Correlation and naming are explicit, not left to the defaults:
+    - AccountCorrelationConfig "HR Correlation" (19-CorrelationConfig-HR.xml)
+      matches on employeeNumber. Without it the aggregator matched on the
+      identity name and the two "Daniel Morgan" rows (1007, 1030) ended up
+      on one identity with two HR links: 100 links, 99 identities.
+    - CreationRule "HR Identity Creation" (13-Rules-HR.xml) names new
+      identities first.last and appends the employee number on a clash
+      (daniel.morgan, daniel.morgan.1030). displayName stays "Daniel Morgan"
+      for both; the UI shows displayName.
   ===========================================================================
 -->
 <sailpoint>
@@ -33,6 +40,16 @@
                name="HR-Application"
                profileClass=""
                type="DelimitedFile">
+
+    <AccountCorrelationConfig>
+      <Reference class="sailpoint.object.CorrelationConfig"
+                 name="HR Correlation"/>
+    </AccountCorrelationConfig>
+
+    <CreationRule>
+      <Reference class="sailpoint.object.Rule"
+                 name="HR Identity Creation"/>
+    </CreationRule>
 
     <Attributes>
       <Map>
@@ -66,31 +83,28 @@
         </entry>
 
         <!--
-          Loest die Vorgesetztenbeziehung auf.
+          Resolves the manager relationship.
 
-          Zu lesen ist der Filter so: property ist die IDENTITAETS-Seite,
-          value das Attribut des ACCOUNTS. IIQ sucht also die Identitaet,
-          deren employeeNumber dem managerEmployeeNumber der Zeile
-          entspricht.
+          Read the filter as: property is the IDENTITY side, value is the
+          ACCOUNT attribute. IIQ looks up the identity whose employeeNumber
+          equals the row's managerEmployeeNumber.
 
-          Voraussetzung: employeeNumber muss auf der Identitaet
-          durchsuchbar sein, also eine extendedNumber besitzen (siehe
-          23-ObjectConfig-Identity.xml). Fehlt sie, liegt der Wert nur im
-          XML-Blob, der Filter findet nichts - und die Hierarchie bleibt
-          still und ohne Fehlermeldung leer.
+          Prerequisite: employeeNumber must be searchable on the identity,
+          i.e. have an extendedNumber (see 23-ObjectConfig-Identity.xml).
+          Without it the value lives only in the XML blob, the filter finds
+          nothing, and the hierarchy stays empty, silently and without any
+          error message.
 
-          Zweite Voraussetzung: MANAGER_LOOKUP muss in der
-          featuresString der Applikation stehen. Fehlt es, wird der
-          Filter gar nicht erst ausgewertet - gespeichert ist er
-          trotzdem, und es gibt keine Fehlermeldung. Die aus der
-          Oberflaeche exportierten DelimitedFile-Vorlagen fuehren das
-          Feature nicht; LDAP-Applikationen dagegen schon.
+          Second prerequisite: MANAGER_LOOKUP must be in the application's
+          featuresString. Without it the filter is never evaluated; it is
+          stored anyway, and there is no error message. The DelimitedFile
+          templates exported from the UI do not carry the feature; LDAP
+          applications do.
 
-          Daraus folgt eine Reihenfolge: Die ObjectConfig muss VOR dem
-          ersten Aggregationslauf importiert sein. Beim Import in einem
-          Zug ist das gegeben, weil 23- nach 20- liegt; bei einem
-          nachtraeglich ergaenzten Attribut muss die Aggregation erneut
-          laufen.
+          This implies an order: the ObjectConfig must be imported BEFORE
+          the first aggregation run. Importing everything in one go
+          satisfies this because 23- sorts after 20-; for an attribute
+          added later the aggregation must be re-run.
         -->
         <entry key="managerCorrelationFilter">
           <value>
@@ -114,12 +128,12 @@
     </Owner>
 
     <!--
-      Das Schema entspricht den Spalten der CSV. Die Reihenfolge ist hier
-      unerheblich, weil hasHeader=true gesetzt ist - der Connector ordnet
-      ueber die Kopfzeile zu, nicht ueber die Position.
+      The schema matches the CSV columns. Order is irrelevant here because
+      hasHeader=true is set: the connector maps by header row, not by
+      position.
 
-      identityAttribute=employeeNumber ist der Schluessel: er ist stabil,
-      waehrend sich Namen und Mailadressen aendern koennen.
+      identityAttribute=employeeNumber is the key: it is stable, whereas
+      names and mail addresses can change.
     -->
     <Schemas>
       <Schema displayAttribute="displayName"
@@ -128,49 +142,49 @@
               nativeObjectType="account"
               objectType="account">
         <AttributeDefinition name="employeeNumber" type="string">
-          <Description>Personalnummer - eindeutiger, stabiler Schluessel</Description>
+          <Description>Employee number, the unique, stable key</Description>
         </AttributeDefinition>
         <AttributeDefinition name="firstName" type="string">
-          <Description>Vorname</Description>
+          <Description>First name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="lastName" type="string">
-          <Description>Nachname</Description>
+          <Description>Last name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="displayName" type="string">
-          <Description>Anzeigename</Description>
+          <Description>Display name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="email" type="string">
-          <Description>Dienstliche Mailadresse</Description>
+          <Description>Business e-mail address</Description>
         </AttributeDefinition>
         <AttributeDefinition name="title" type="string">
-          <Description>Funktionsbezeichnung</Description>
+          <Description>Job title</Description>
         </AttributeDefinition>
         <AttributeDefinition name="department" type="string">
-          <Description>Abteilung</Description>
+          <Description>Department</Description>
         </AttributeDefinition>
         <AttributeDefinition name="location" type="string">
-          <Description>Standort</Description>
+          <Description>Location</Description>
         </AttributeDefinition>
         <AttributeDefinition name="costCentre" type="string">
-          <Description>Kostenstelle</Description>
+          <Description>Cost centre</Description>
         </AttributeDefinition>
         <AttributeDefinition name="employeeType" type="string">
-          <Description>Hierarchieebene: department-head, team-lead, staff</Description>
+          <Description>Hierarchy level: department-head, team-lead, staff</Description>
         </AttributeDefinition>
         <AttributeDefinition name="phone" type="string">
-          <Description>Telefonnummer</Description>
+          <Description>Phone number</Description>
         </AttributeDefinition>
         <AttributeDefinition name="managerEmployeeNumber" type="string">
-          <Description>Personalnummer des Vorgesetzten</Description>
+          <Description>Employee number of the manager</Description>
         </AttributeDefinition>
         <AttributeDefinition name="startDate" type="string">
-          <Description>Eintrittsdatum JJJJ-MM-TT - steuert den Joiner</Description>
+          <Description>Start date YYYY-MM-DD, drives the joiner</Description>
         </AttributeDefinition>
         <AttributeDefinition name="endDate" type="string">
-          <Description>Austrittsdatum JJJJ-MM-TT, leer bei unbefristet - steuert den Leaver</Description>
+          <Description>End date YYYY-MM-DD, empty for open-ended employment, drives the leaver</Description>
         </AttributeDefinition>
         <AttributeDefinition name="status" type="string">
-          <Description>active, inactive oder future - abgeleitet aus den Datumsfeldern</Description>
+          <Description>active, inactive or future, derived from the date fields</Description>
         </AttributeDefinition>
       </Schema>
     </Schemas>

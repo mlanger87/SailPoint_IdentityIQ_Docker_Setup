@@ -1,0 +1,331 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Lifecycle rules
+  ===========================================================================
+  Based on the two date fields of the HR source:
+
+      startDate   start of employment
+      endDate     end of employment, empty for open-ended employment
+
+  Four states follow from them:
+
+      startDate in the future            -> start pending
+      startDate reached, no end          -> active, open-ended
+      end in the future                  -> active, fixed-term
+      end reached or passed              -> left
+
+  Two triggers use the computed attribute (see 29-Lifecycle-Events.xml):
+  the joiner is a plain type="AttributeChange" trigger with
+  oldValueFilter/newValueFilter, IIQ detects the flip of inactive
+  itself. The leaver needs the TriggerRule "HR Leaver Trigger" below,
+  because a Selector MatchTerm cannot test "endDate is not null".
+
+  This file also holds the FieldValue rule "HR Derive Account Name"
+  shared by the LDAP and JDBC create policies. It sorts before the
+  ObjectConfig (23) and the applications (22, 27) on purpose: the
+  import resolves RuleRefs at import time, so a rule must exist before
+  the object that points at it.
+
+  Why the cut-off date comparison and not simply the status column: a
+  departure takes effect even if the source has not yet updated the
+  status. In real projects the aggregation runs daily, the status
+  maintenance in the HR system does not; the cut-off date is the more
+  reliable basis.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <!-- ===================================================================
+       Lock status from the end date
+       ===================================================================
+       Sets the IIQ standard attribute "inactive". It controls whether an
+       identity can log in and whether it appears in certifications.
+
+       The rule returns true as soon as the end date is reached OR the
+       start is still pending. Someone who has not started yet gets as
+       little access as someone who has left.
+  -->
+  <Rule language="beanshell" name="HR Set Inactive" type="IdentityAttribute">
+    <Description>
+      Computes the lock status from startDate and endDate of the HR source.
+    </Description>
+    <Signature returnType="Object">
+      <Inputs>
+        <Argument name="identity" type="sailpoint.object.Identity"/>
+        <Argument name="link" type="sailpoint.object.Link"/>
+      </Inputs>
+      <Returns>
+        <Argument name="value" type="Object"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.text.SimpleDateFormat;
+      import java.util.Date;
+      import sailpoint.object.Identity;
+      import sailpoint.object.Link;
+      import sailpoint.tools.Util;
+
+      // IMPORTANT: in BeanShell an unbound argument is "void", not null.
+      // A plain (link != null) triggers the error itself, because
+      // resolving the undefined variable already fails:
+      //     bsh.EvalError: ... on undefined variable or class name: link
+      //
+      // This rule runs from two contexts: during aggregation (link bound)
+      // and during identity refresh without an account (link undefined).
+      // Hence check for void first and normalize to a local variable.
+      Link hrLink = null;
+      if (link != void && link != null) {
+          hrLink = link;
+      }
+      Identity ident = null;
+      if (identity != void && identity != null) {
+          ident = identity;
+      }
+
+      // The values are on the HR link, not on the identity: this rule
+      // runs during attribute computation, so the identity is not yet
+      // fully populated at that point.
+      //
+      // Link has NO getStringAttribute(), only Identity has. On the link
+      // use getAttribute() with a cast (checked against the running 8.5).
+      String start = null;
+      String end  = null;
+
+      if (hrLink != null) {
+          start = (String) hrLink.getAttribute("startDate");
+          end  = (String) hrLink.getAttribute("endDate");
+      }
+      if (Util.isNullOrEmpty(start) && ident != null) {
+          start = ident.getStringAttribute("startDate");
+      }
+      if (Util.isNullOrEmpty(end) && ident != null) {
+          end = ident.getStringAttribute("endDate");
+      }
+
+      // No dates, no verdict: do not lock.
+      if (Util.isNullOrEmpty(start) && Util.isNullOrEmpty(end)) {
+          return Boolean.FALSE;
+      }
+
+      SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd");
+      fmt.setLenient(false);
+
+      // Truncate to day precision: otherwise an end date of today would
+      // count differently depending on the time of day.
+      java.util.Calendar cal = java.util.Calendar.getInstance();
+      cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+      cal.set(java.util.Calendar.MINUTE, 0);
+      cal.set(java.util.Calendar.SECOND, 0);
+      cal.set(java.util.Calendar.MILLISECOND, 0);
+      Date today = cal.getTime();
+
+      // Start still pending.
+      if (Util.isNotNullOrEmpty(start)) {
+          try {
+              Date startDay = fmt.parse(start);
+              if (startDay.after(today)) {
+                  return Boolean.TRUE;
+              }
+          } catch (Exception e) {
+              // Do not treat an unparseable date as a lock reason: a typo
+              // in the source must not lock anyone out.
+          }
+      }
+
+      // End reached or passed.
+      if (Util.isNotNullOrEmpty(end)) {
+          try {
+              Date endDay = fmt.parse(end);
+              if (!endDay.after(today)) {
+                  return Boolean.TRUE;
+              }
+          } catch (Exception e) {
+              // see above
+          }
+      }
+
+      return Boolean.FALSE;
+    ]]></Source>
+  </Rule>
+
+  <!-- ===================================================================
+       Separating leaver from joiner
+       ===================================================================
+       Both groups flip inactive from false to true: an identity with a
+       future start date is first created active and then locked. The
+       trigger alone cannot tell them apart.
+
+       A Selector with MatchTerm was NOT sufficient: for future starts
+       endDate is null, not empty. A negative="true" with value="" tests
+       for "not equal to empty string" and thereby also matches null.
+       Measured: 10 leaver runs for 4 real leavers.
+
+       This rule instead checks explicitly for a set value.
+  -->
+  <Rule language="beanshell" name="HR Leaver Trigger" type="IdentityTrigger">
+    <Description>
+      Matches only when an end date is set and reached; separates the
+      leaver case from the joiner case.
+    </Description>
+    <Signature returnType="boolean">
+      <Inputs>
+        <Argument name="previousIdentity" type="sailpoint.object.Identity"/>
+        <Argument name="newIdentity" type="sailpoint.object.Identity"/>
+      </Inputs>
+      <Returns>
+        <Argument name="value" type="boolean"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import sailpoint.object.Identity;
+      import sailpoint.tools.Util;
+
+      // Unbound arguments are "void" in BeanShell, not null.
+      Identity current = null;
+      if (newIdentity != void && newIdentity != null) {
+          current = newIdentity;
+      }
+      Identity previous = null;
+      if (previousIdentity != void && previousIdentity != null) {
+          previous = previousIdentity;
+      }
+
+      if (current == null) {
+          return false;
+      }
+
+      // The transition from active to locked.
+      boolean becameInactive = (previous == null || !previous.isInactive())
+                              && current.isInactive();
+      if (!becameInactive) {
+          return false;
+      }
+
+      // Decisive: only with a set end date is this a departure. For a
+      // start not yet reached the field is null.
+      String end = current.getStringAttribute("endDate");
+      return Util.isNotNullOrEmpty(end);
+    ]]></Source>
+  </Rule>
+
+  <!-- ===================================================================
+       Account name for the target systems
+       ===================================================================
+       One rule instead of the same derivation pasted into three create
+       policy fields (LDAP dn, LDAP uid, JDBC Account). The copies had
+       already drifted apart and none of them handled collisions: the
+       CSV holds two "Daniel Morgan" (1007 and 1030), both would have
+       become dmorgan and the second create would have failed against
+       the directory.
+
+       Pattern: first initial plus last name, lower case, anything
+       outside [a-z0-9] stripped, identity name as fallback. Same as the
+       seed accounts.
+
+       Uniqueness is checked against the links of the application the
+       policy belongs to, matching the LDAP DN prefix "uid=<name>,".
+       On a hit the last two digits of the employee number are appended,
+       on a second hit the full number. The identity's own existing
+       link is not a collision (re-running the policy must be stable).
+       For the JDBC target the prefix never matches, so it simply gets
+       the base name; its correlation key is IIQID, not Account.
+
+       Referenced from a Field via RuleRef. The dn field of the LDAP
+       policy calls it through context.runRule with the same arguments,
+       so dn and uid always agree.
+  -->
+  <Rule language="beanshell" name="HR Derive Account Name" type="FieldValue">
+    <Description>
+      Derives a unique account name (first initial plus last name) for the
+      create policies of the target systems.
+    </Description>
+    <Signature returnType="String">
+      <Inputs>
+        <Argument name="context" type="sailpoint.api.SailPointContext"/>
+        <Argument name="identity" type="sailpoint.object.Identity"/>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="field" type="sailpoint.object.Field"/>
+        <Argument name="form" type="sailpoint.object.Form"/>
+        <Argument name="current" type="java.lang.Object"/>
+      </Inputs>
+      <Returns>
+        <Argument name="value" type="String"/>
+      </Returns>
+    </Signature>
+    <Source><![CDATA[
+      import java.util.ArrayList;
+      import java.util.List;
+      import sailpoint.object.Application;
+      import sailpoint.object.Filter;
+      import sailpoint.object.Identity;
+      import sailpoint.object.Link;
+      import sailpoint.object.QueryOptions;
+      import sailpoint.tools.Util;
+
+      // Unbound arguments are "void" in BeanShell, not null. Which of
+      // them are bound depends on the caller (policy evaluation, form
+      // refresh, runRule from another script), so every optional one is
+      // normalized first.
+      Identity ident = null;
+      if (identity != void && identity != null) {
+          ident = identity;
+      }
+      Application app = null;
+      if (application != void && application != null) {
+          app = application;
+      }
+      if (ident == null) {
+          return null;
+      }
+
+      String first = ident.getFirstname();
+      String last  = ident.getLastname();
+      String base;
+      if (Util.isNotNullOrEmpty(first) && Util.isNotNullOrEmpty(last)) {
+          base = (first.substring(0, 1) + last).toLowerCase();
+      } else {
+          base = ident.getName().toLowerCase();
+      }
+      base = base.replaceAll("[^a-z0-9]", "");
+      if (base.length() == 0) {
+          base = ident.getName().toLowerCase().replaceAll("[^a-z0-9]", "");
+      }
+
+      // Without an application there is nothing to check against.
+      if (app == null) {
+          return base;
+      }
+
+      String empNo = ident.getStringAttribute("employeeNumber");
+      if (empNo == null) {
+          empNo = "";
+      }
+      String last2 = (empNo.length() >= 2)
+                   ? empNo.substring(empNo.length() - 2) : empNo;
+
+      List candidates = new ArrayList();
+      candidates.add(base);
+      candidates.add(base + last2);
+      candidates.add(base + empNo);
+
+      String chosen = base;
+      for (String candidate : candidates) {
+          QueryOptions qo = new QueryOptions();
+          qo.add(Filter.eq("application", app));
+          qo.add(Filter.like("nativeIdentity", "uid=" + candidate + ",",
+                             Filter.MatchMode.START));
+          if (ident.getId() != null) {
+              qo.add(Filter.ne("identity", ident));
+          }
+          chosen = candidate;
+          if (context.countObjects(Link.class, qo) == 0) {
+              break;
+          }
+      }
+      return chosen;
+    ]]></Source>
+  </Rule>
+
+</sailpoint>

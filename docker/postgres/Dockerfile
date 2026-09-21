@@ -1,41 +1,37 @@
 # ===========================================================================
-# PostgreSQL 17 mit vorbereitetem IdentityIQ-Schema
+# PostgreSQL 17 with the IdentityIQ schema pre-provisioned
 # ---------------------------------------------------------------------------
-# Das Schema wird NICHT zur Laufzeit von einem SQL-Client im App-Container
-# angelegt (so machen es die Referenzprojekte A und D), sondern ueber den
-# nativen Mechanismus /docker-entrypoint-initdb.d des offiziellen
-# Postgres-Images. Vorteile: laeuft genau einmal (wenn das Datenverzeichnis
-# leer ist), braucht keinen Marker, und der App-Container bleibt frei von
-# Datenbank-Werkzeugen.
+# The schema is NOT created at runtime by an SQL client in the app
+# container (reference projects A and D do that) but via the official
+# Postgres image's native /docker-entrypoint-initdb.d mechanism. Benefits:
+# runs exactly once (when the data directory is empty), needs no marker,
+# and the app container stays free of database tooling.
 #
-# Besonderheit der SailPoint-PostgreSQL-DDL (verifiziert am Paket 8.5):
-#   - Sie legt ALLE drei Datenbanken selbst an (identityiq, identityiqah,
-#     identityiqPlugin) inkl. der drei Benutzer.
-#     => POSTGRES_DB darf deshalb NICHT gesetzt werden.
-#   - Sie enthaelt 9 psql-Meta-Kommandos (\connect), um zwischen den
-#     Datenbanken zu wechseln.
-#     => Sie muss von psql ausgefuehrt werden, nicht ueber einen
-#        generischen JDBC-/SQL-Treiber.
-#   - Case-insensitive Suche wird ueber 244 Funktionsindizes auf upper()
-#     geloest. Es ist also KEINE spezielle Collation noetig.
+# Quirks of SailPoint's PostgreSQL DDL (verified against the 8.5 package):
+#   - It creates ALL three databases itself (identityiq, identityiqah,
+#     identityiqPlugin) including the three users.
+#     => POSTGRES_DB must therefore NOT be set.
+#   - It contains 9 psql meta-commands (\connect) to switch databases.
+#     => It must be run by psql, not through a generic JDBC/SQL driver.
+#   - Case-insensitive search is solved via 244 functional indexes on
+#     upper(). NO special collation is needed.
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: DDL aus dem Installationspaket holen und parametrisieren
+# Stage 1: pull the DDL from the installation package and parameterize it
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS ddl
 
-# Hinweis zu den Passwort-ARGs (Linter-Warnung docker:S6472):
-# Das ist hier bewusst in Kauf genommen. Die DDL von SailPoint legt die
-# Datenbankbenutzer per "CREATE USER ... ENCRYPTED PASSWORD" an; die
-# Passwoerter muessen also zur Build-Zeit in die SQL-Datei. Sie landen
-# dadurch in der Build-History dieser Zwischen-Stage.
+# On the password ARGs (linter warning docker:S6472):
+# Accepted deliberately. SailPoint's DDL creates the database users via
+# "CREATE USER ... ENCRYPTED PASSWORD"; the passwords therefore have to
+# be in the SQL file at build time. They end up in this intermediate
+# stage's build history.
 #
-# Fuer eine lokale Entwicklungsumgebung ist das vertretbar - die Werte
-# stehen ohnehin in der .env und die DB ist nicht exponiert.
-# Fuer eine Produktivumgebung waere stattdessen der Weg ueber
-# BuildKit-Secrets (RUN --mount=type=secret) bzw. ein nachgelagertes
-# ALTER USER aus einem Docker-Secret zu waehlen.
+# Acceptable for a local dev environment - the values are in .env anyway
+# and the DB is not exposed.
+# For production, use BuildKit secrets (RUN --mount=type=secret) or a
+# subsequent ALTER USER from a Docker secret instead.
 ARG IIQ_VERSION=8.5
 ARG IIQ_DB_USER=identityiq
 ARG IIQ_DB_PASSWORD=identityiq
@@ -50,61 +46,66 @@ RUN apt-get update \
 
 WORKDIR /work
 
-# Das Installationspaket wird aus installer/ in den Build-Kontext gereicht.
+# The installation package is passed into the build context from installer/.
 COPY installer/*.zip /work/package.zip
 
-# Nur die benoetigte DDL entpacken - nicht das ganze 770-MB-Paket.
+# Extract only the required DDL - not the whole 770 MB package.
 RUN unzip -j -o /work/package.zip \
         "database/create_identityiq_tables-${IIQ_VERSION}.postgresql" \
         -d /work/extracted \
  && mv /work/extracted/create_identityiq_tables-${IIQ_VERSION}.postgresql \
        /work/extracted/01-create-identityiq.sql
 
-# Die von SailPoint ausgelieferte DDL enthaelt die Default-Passwoerter fest
-# verdrahtet (CREATE USER identityiq WITH ENCRYPTED PASSWORD 'identityiq').
-# Sie werden hier durch die Werte aus der .env ersetzt.
-# Dieses Muster stammt aus Referenzprojekt C (database-setup.mssql.sh).
+# SailPoint's DDL hard-codes the default passwords
+# (CREATE USER identityiq WITH ENCRYPTED PASSWORD 'identityiq').
+# They are replaced here with the values from .env.
+# Pattern from reference project C (database-setup.mssql.sh).
 #
-# Gezielt nur die CREATE-USER-Zeilen anfassen, damit keine gleichnamigen
-# Bezeichner an anderer Stelle der 9.146-Zeilen-Datei getroffen werden.
+# Touch only the CREATE USER lines so no identically named identifiers
+# elsewhere in the 9,146-line file are hit.
 RUN cd /work/extracted \
  && sed -i \
       -e "s|^CREATE USER identityiq WITH ENCRYPTED PASSWORD 'identityiq';|CREATE USER ${IIQ_DB_USER} WITH ENCRYPTED PASSWORD '${IIQ_DB_PASSWORD}';|" \
       -e "s|^CREATE USER \"identityiqPlugin\" WITH ENCRYPTED PASSWORD 'identityiqPlugin';|CREATE USER \"${IIQ_PLUGIN_DB_USER}\" WITH ENCRYPTED PASSWORD '${IIQ_PLUGIN_DB_PASSWORD}';|" \
       -e "s|^CREATE USER identityiqah WITH ENCRYPTED PASSWORD 'identityiqah';|CREATE USER ${IIQ_AH_DB_USER} WITH ENCRYPTED PASSWORD '${IIQ_AH_DB_PASSWORD}';|" \
       01-create-identityiq.sql \
- && echo "--- Kontrolle: erzeugte CREATE-USER-Zeilen ---" \
+ && echo "--- Check: resulting CREATE USER lines ---" \
  && grep -n "^CREATE USER" 01-create-identityiq.sql
 
 # ---------------------------------------------------------------------------
-# Stage 2: Laufzeit-Image
+# Stage 2: runtime image
 # ---------------------------------------------------------------------------
 FROM postgres:17-bookworm
 
-# Wird beim ersten Start automatisch von psql ausgefuehrt (alphabetisch).
+# Executed automatically by psql on first start (alphabetical order).
 COPY --from=ddl /work/extracted/01-create-identityiq.sql \
                 /docker-entrypoint-initdb.d/01-create-identityiq.sql
 
-# Setzt den search_path auf die IIQ-Schemata, damit Tabellen auch ohne
-# Schema-Praefix gefunden werden (Adminer, psql, eigene Auswertungen).
-# Muss NACH der Schema-DDL laufen - daher Praefix 02.
+# Sets search_path to the IIQ schemas so tables are found without a
+# schema prefix (DBGate, psql, ad-hoc queries).
+# Must run AFTER the schema DDL - hence prefix 02.
 COPY docker/postgres/02-search-path.sql \
      /docker-entrypoint-initdb.d/02-search-path.sql
 
-# Vierte Datenbank als Zielsystem fuer den JDBC-Connector. Bewusst im
-# selben Container: der PostgreSQL-JDBC-Treiber liegt bereits im
-# IIQ-Image, ein zweites Datenbanksystem haette keinen Erkenntniswert.
+# Fourth database as target system for the JDBC connector. Deliberately
+# in the same container: the PostgreSQL JDBC driver is already in the
+# IIQ image; a second DBMS would add nothing.
 COPY docker/postgres/03-targetdb.sql \
      /docker-entrypoint-initdb.d/03-targetdb.sql
 
-# Tuning fuer IdentityIQ.
+# Seed rows for targetdb, generated from the same person list as the HR
+# CSV (scripts/generate-testdata.py). Runs after the DDL - prefix 04.
+COPY docker/postgres/04-targetdb-seed.sql \
+     /docker-entrypoint-initdb.d/04-targetdb-seed.sql
+
+# Tuning for IdentityIQ.
 #
-# "include_dir" laesst sich NICHT per "postgres -c" setzen (es ist nur in
-# einer Konfigurationsdatei gueltig, sonst: FATAL unrecognized
-# configuration parameter). Das Tuning wird deshalb als initdb-Hook an die
-# vom Entrypoint erzeugte postgresql.conf angehaengt.
+# "include_dir" can NOT be set via "postgres -c" (it is only valid inside
+# a configuration file, otherwise: FATAL unrecognized configuration
+# parameter). The tuning is therefore appended as an initdb hook to the
+# postgresql.conf generated by the entrypoint.
 #
-# Skripte in /docker-entrypoint-initdb.d laufen alphabetisch; der
-# 00-Praefix stellt sicher, dass die Konfiguration vor der DDL greift.
+# Scripts in /docker-entrypoint-initdb.d run alphabetically; the 00
+# prefix ensures the configuration lands before the DDL.
 COPY docker/postgres/postgresql.tuning.conf /opt/iiq/postgresql.tuning.conf
 COPY docker/postgres/00-apply-tuning.sh     /docker-entrypoint-initdb.d/00-apply-tuning.sh

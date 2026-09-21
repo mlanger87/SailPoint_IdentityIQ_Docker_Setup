@@ -2,44 +2,44 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  Lifecycle-Events: Joiner und Leaver
+  Lifecycle events: joiner and leaver
   ===========================================================================
-  Die Kette im Ueberblick:
+  The chain at a glance:
 
-      HR-CSV (startDate/endDate)
-          -> Regel "HR Set Inactive" berechnet das Attribut inactive
-              -> IdentityTrigger erkennt den Wechsel
-                  -> Workflow provisioniert oder deaktiviert
+      HR CSV (startDate/endDate)
+          -> rule "HR Set Inactive" computes the attribute inactive
+              -> IdentityTrigger detects the change
+                  -> workflow provisions or disables
 
-  Die Struktur folgt den mitgelieferten Triggern "Joiner" und "Leaver"
-  (nachzusehen mit: get IdentityTrigger Leaver). Wichtig daran:
+  The structure follows the shipped triggers "Joiner" and "Leaver"
+  (inspect with: get IdentityTrigger Leaver). What matters:
 
-    - Der Workflow wird ueber das ATTRIBUT handler und die
-      HandlerParameters referenziert, nicht ueber ein Element. Ein
-      <Handler>-Element gibt es nicht; die DTD listet nur
-      AssignedScope, Description, Owner, HandlerParameters,
-      PendingWorkflow, TriggerRule und Selector.
+    - The workflow is referenced through the ATTRIBUTE handler and the
+      HandlerParameters, not through an element. There is no <Handler>
+      element; the DTD lists only AssignedScope, Description, Owner,
+      HandlerParameters, PendingWorkflow, TriggerRule and Selector.
 
-    - type="AttributeChange" mit oldValueFilter und newValueFilter
-      reicht aus. Eine eigene TriggerRule waere nur noetig, wenn die
-      Bedingung komplexer ist als ein Attributwechsel.
+    - For the joiner, type="AttributeChange" with oldValueFilter and
+      newValueFilter is sufficient. The leaver needs a TriggerRule
+      (type="Rule", "HR Leaver Trigger" in 12-Rules-Lifecycle.xml),
+      because MatchTerm cannot test "is not null"; see below.
 
-  Abweichung vom mitgelieferten Joiner: Jener nutzt type="Create",
-  feuert also beim Anlegen der Identitaet. Das passt hier nicht - bei
-  einem kuenftigen Eintrittsdatum entsteht die Identitaet lange vor dem
-  ersten Arbeitstag. Ausgeloest wird deshalb ueber denselben
-  Attributwechsel wie beim Leaver, nur in die andere Richtung.
+  Deviation from the shipped Joiner: that one uses type="Create", i.e.
+  fires when the identity is created. That does not fit here: with a
+  future start date the identity exists long before the first working
+  day. It is therefore triggered by the same attribute change as the
+  leaver, only in the opposite direction.
 
-  Die mitgelieferten Trigger bleiben unangetastet und deaktiviert.
+  The shipped triggers remain untouched and disabled.
   ===========================================================================
 -->
 <sailpoint>
 
   <!-- ===================================================================
-       Joiner: inactive wechselt von true auf false
+       Joiner: inactive flips from true to false
        ===================================================================
-       Tritt ein, sobald das Eintrittsdatum erreicht ist - die Regel
-       "HR Set Inactive" gibt dann false zurueck.
+       Fires as soon as the start date is reached; the rule
+       "HR Set Inactive" then returns false.
   -->
   <IdentityTrigger name="HR Joiner"
                    attributeName="inactive"
@@ -49,8 +49,8 @@
                    handler="sailpoint.api.WorkflowTriggerHandler"
                    disabled="false">
     <Description>
-      Startet den Joiner-Workflow, sobald das Eintrittsdatum erreicht ist
-      und die Identitaet dadurch aktiv wird.
+      Starts the joiner workflow as soon as the start date is reached and
+      the identity thereby becomes active.
     </Description>
     <HandlerParameters>
       <Attributes>
@@ -65,85 +65,148 @@
             name="HR Joiner Workflow"
             type="IdentityLifecycle">
     <Description>
-      Legt fuer eine neu eingetretene Identitaet die Konten in den
-      Zielsystemen an - abgeleitet aus den zugewiesenen Rollen.
+      Creates the accounts in the target systems for a newly joined
+      identity, derived from the assigned roles.
     </Description>
     <Variable input="true" name="identityName">
-      <Description>Name der ausloesenden Identitaet</Description>
+      <Description>Name of the triggering identity</Description>
     </Variable>
     <Variable input="true" name="trigger"/>
     <Variable input="true" name="identity"/>
     <Variable input="true" name="previousIdentity"/>
     <Variable initializer="false" name="trace"/>
+    <Variable name="plan"/>
+    <Variable name="project"/>
 
     <Step icon="Start" name="Start" posX="28" posY="10">
+      <Transition to="Build plan"/>
+    </Step>
+
+    <!--
+      Returning person: the leaver disabled the target accounts and a
+      refresh does not enable them again (the role is satisfied by the
+      existing, disabled account). So the accounts IIQ knows as disabled
+      get an explicit Enable first; for a brand-new joiner the list is
+      empty and the step is skipped. Measured before this step: joiner
+      run Success, WebService account still iiqDisabled=true.
+    -->
+    <Step icon="Task" name="Build plan" posX="130" posY="10" resultVariable="plan">
+      <Script>
+        <Source><![CDATA[
+          import java.util.List;
+          import sailpoint.object.Identity;
+          import sailpoint.object.Link;
+          import sailpoint.object.ProvisioningPlan;
+          import sailpoint.object.ProvisioningPlan.AccountRequest;
+          Identity ident = context.getObjectByName(Identity.class, identityName);
+          if (ident == null || ident.getLinks() == null) {
+              return null;
+          }
+          ProvisioningPlan p = new ProvisioningPlan();
+          p.setIdentity(ident);
+          for (Link link : ident.getLinks()) {
+              if (!link.isDisabled()) {
+                  continue;
+              }
+              if (link.getApplication() != null
+                      && link.getApplication().isAuthoritative()) {
+                  continue;
+              }
+              AccountRequest req = new AccountRequest();
+              req.setApplication(link.getApplicationName());
+              req.setNativeIdentity(link.getNativeIdentity());
+              req.setOperation(AccountRequest.Operation.Enable);
+              p.add(req);
+          }
+          return (p.getAccountRequests() != null
+                  && !p.getAccountRequests().isEmpty()) ? p : null;
+        ]]></Source>
+      </Script>
+      <Transition to="Compile" when="script:return plan != null"/>
+      <Transition to="Refresh"/>
+    </Step>
+
+    <Step action="call:compileProvisioningProject"
+          icon="Task"
+          name="Compile"
+          posX="240"
+          posY="60"
+          resultVariable="project">
+      <Arg name="plan" value="ref:plan"/>
+      <Arg name="identityName" value="ref:identityName"/>
+      <Transition to="Provision"/>
+    </Step>
+
+    <Step action="call:provisionProject"
+          icon="Task"
+          name="Provision"
+          posX="350"
+          posY="60">
+      <Arg name="project" value="ref:project"/>
       <Transition to="Refresh"/>
     </Step>
 
     <!--
-      Der Plan wird nicht selbst gebaut: Die Rollenzuweisung ergibt sich
-      aus den Selectors der Bundles, und refreshIdentity leitet daraus
-      die noetigen Kontoanlagen ab. Ein handgeschriebener Plan muesste
-      dieselbe Logik doppeln und liefe bei jeder Rollenaenderung aus dem
-      Tritt.
+      The create plan is not built by hand: role assignment follows from
+      the bundles' selectors, and refreshIdentity derives the required
+      account creations from it. A hand-written plan would duplicate that
+      logic and fall out of step on every role change.
     -->
     <Step action="call:refreshIdentity"
           icon="Task"
           name="Refresh"
-          posX="130"
+          posX="240"
           posY="10">
       <Description>
-        Wertet die Rollen aus und provisioniert, was fehlt.
+        Evaluates the roles and provisions whatever is missing.
       </Description>
       <Arg name="identityName" value="ref:identityName"/>
       <Arg name="correlateEntitlements" value="true"/>
       <Arg name="provision" value="true"/>
-      <Arg name="refreshAssignedRoles" value="true"/>
-      <Transition to="Protokoll"/>
+      <Transition to="Log"/>
     </Step>
 
-    <Step icon="Message" name="Protokoll" posX="240" posY="10">
+    <Step icon="Message" name="Log" posX="240" posY="10">
       <Script>
         <Source><![CDATA[
           import org.apache.commons.logging.LogFactory;
           LogFactory.getLog("iiq.lifecycle").info(
-              "Joiner ausgefuehrt fuer: " + identityName);
+              "Joiner executed for: " + identityName);
         ]]></Source>
       </Script>
-      <Transition to="Ende"/>
+      <Transition to="End"/>
     </Step>
 
-    <Step icon="Stop" name="Ende" posX="350" posY="10"/>
+    <Step icon="Stop" name="End" posX="350" posY="10"/>
   </Workflow>
 
   <!-- ===================================================================
-       Leaver: inactive wechselt von false auf true
+       Leaver: inactive flips from false to true
        =================================================================== -->
   <!--
-    type="Rule" statt "AttributeChange": Die Regel prueft den Wechsel
-    selbst UND grenzt gegen den Joiner-Fall ab. Ob IIQ bei
-    type="AttributeChange" eine zusaetzliche TriggerRule ueberhaupt
-    auswertet, ist nicht belegt - keiner der mitgelieferten Trigger
-    kombiniert beides. Mit type="Rule" ist die Auswertung eindeutig.
+    type="Rule" instead of "AttributeChange": the rule checks the change
+    itself AND separates it from the joiner case. Whether IIQ evaluates
+    an additional TriggerRule at all with type="AttributeChange" is not
+    documented; none of the shipped triggers combines both. With
+    type="Rule" the evaluation is unambiguous.
   -->
   <IdentityTrigger name="HR Leaver"
                    type="Rule"
                    handler="sailpoint.api.WorkflowTriggerHandler"
                    disabled="false">
     <Description>
-      Startet den Leaver-Workflow, sobald das Austrittsdatum erreicht ist.
+      Starts the leaver workflow as soon as the end date is reached.
     </Description>
     <!--
-      Abgrenzung zum Joiner ueber eine TriggerRule.
+      Separation from the joiner via a TriggerRule.
 
-      Beide Gruppen wechseln inactive von false auf true - eine
-      Identitaet mit kuenftigem Eintrittsdatum wird zunaechst aktiv
-      angelegt und dann gesperrt.
+      Both groups flip inactive from false to true; an identity with a
+      future start date is first created active and then locked.
 
-      Ein Selector mit MatchTerm genuegte hier NICHT: bei kuenftigen
-      Eintritten ist endDate null, nicht leer, und negative="true" mit
-      value="" trifft auch auf null zu. Gemessen: 10 Leaver-Laeufe bei
-      4 echten Leavern.
+      A Selector with MatchTerm was NOT sufficient here: for future
+      starts endDate is null, not empty, and negative="true" with
+      value="" also matches null. Measured: 10 leaver runs for 4 real
+      leavers.
     -->
     <TriggerRule>
       <Reference class="sailpoint.object.Rule" name="HR Leaver Trigger"/>
@@ -161,8 +224,7 @@
             name="HR Leaver Workflow"
             type="IdentityLifecycle">
     <Description>
-      Deaktiviert die Konten einer ausgeschiedenen Identitaet in allen
-      Zielsystemen.
+      Disables the accounts of a departed identity in all target systems.
     </Description>
     <Variable input="true" name="identityName"/>
     <Variable input="true" name="trigger"/>
@@ -170,22 +232,22 @@
     <Variable input="true" name="previousIdentity"/>
     <Variable initializer="false" name="trace"/>
     <Variable name="plan"/>
+    <Variable name="project"/>
 
     <Step icon="Start" name="Start" posX="28" posY="10">
-      <Transition to="Plan bauen"/>
+      <Transition to="Build plan"/>
     </Step>
 
     <!--
-      Hier wird der Plan bewusst selbst gebaut: Es geht um Deaktivieren,
-      nicht um Loeschen. Ein Refresh wuerde die Konten entfernen, sobald
-      die Rollen wegfallen - die Daten sollen aber aus Nachweisgruenden
-      erhalten bleiben.
+      Here the plan is deliberately built by hand: the goal is disabling,
+      not deleting. A refresh would remove the accounts as soon as the
+      roles drop away; the data must be retained for audit reasons.
 
-      Abgrenzung zum Joiner-Fall: Der Trigger feuert auch, wenn jemand
-      mit kuenftigem Eintrittsdatum angelegt wird (inactive=true). Ohne
-      Austrittsdatum darf dann nichts deaktiviert werden.
+      Separation from the joiner case: the trigger also fires when
+      someone with a future start date is created (inactive=true).
+      Without an end date nothing may be disabled then.
     -->
-    <Step icon="Task" name="Plan bauen" posX="130" posY="10" resultVariable="plan">
+    <Step icon="Task" name="Build plan" posX="130" posY="10" resultVariable="plan">
       <Script>
         <Source><![CDATA[
           import java.util.List;
@@ -200,10 +262,10 @@
               return null;
           }
 
-          // Ohne Austrittsdatum liegt kein Austritt vor, sondern ein
-          // noch nicht erreichter Eintritt.
-          String ende = ident.getStringAttribute("endDate");
-          if (Util.isNullOrEmpty(ende)) {
+          // Without an end date this is not a departure but a start not
+          // yet reached.
+          String endDate = ident.getStringAttribute("endDate");
+          if (Util.isNullOrEmpty(endDate)) {
               return null;
           }
 
@@ -216,13 +278,15 @@
           p.setIdentity(ident);
 
           for (Link link : links) {
-              String app = link.getApplicationName();
-
-              // Die HR-Quelle ist kein Zielsystem - dort wird nichts
-              // veraendert.
-              if ("HR-Application".equals(app)) {
+              // Authoritative sources (HR) are not target systems;
+              // nothing is changed there. Checked via the application
+              // flag, not a hard-coded name, so a second HR feed is
+              // skipped as well.
+              if (link.getApplication() != null
+                      && link.getApplication().isAuthoritative()) {
                   continue;
               }
+              String app = link.getApplicationName();
 
               AccountRequest req = new AccountRequest();
               req.setApplication(app);
@@ -235,32 +299,51 @@
                   && !p.getAccountRequests().isEmpty()) ? p : null;
         ]]></Source>
       </Script>
-      <Transition to="Provisionieren" when="script:return plan != null"/>
-      <Transition to="Protokoll"/>
+      <Transition to="Compile" when="script:return plan != null"/>
+      <Transition to="Log"/>
+    </Step>
+
+    <!--
+      Two steps, as in the shipped workflows (see
+      workflow-identityCorrelation.xml): the plan is first compiled into
+      a ProvisioningProject, and only the project is executed.
+      provisionProject takes the argument "project", not "plan"; handed
+      the plan it fails with "Missing argument: project" and the case
+      stays open.
+    -->
+    <Step action="call:compileProvisioningProject"
+          icon="Task"
+          name="Compile"
+          posX="240"
+          posY="10"
+          resultVariable="project">
+      <Arg name="plan" value="ref:plan"/>
+      <Arg name="identityName" value="ref:identityName"/>
+      <Transition to="Provision"/>
     </Step>
 
     <Step action="call:provisionProject"
           icon="Task"
-          name="Provisionieren"
-          posX="240"
+          name="Provision"
+          posX="350"
           posY="10">
-      <Arg name="plan" value="ref:plan"/>
+      <Arg name="project" value="ref:project"/>
       <Arg name="identityName" value="ref:identityName"/>
-      <Transition to="Protokoll"/>
+      <Transition to="Log"/>
     </Step>
 
-    <Step icon="Message" name="Protokoll" posX="350" posY="10">
+    <Step icon="Message" name="Log" posX="460" posY="10">
       <Script>
         <Source><![CDATA[
           import org.apache.commons.logging.LogFactory;
           LogFactory.getLog("iiq.lifecycle").info(
-              "Leaver ausgefuehrt fuer: " + identityName);
+              "Leaver executed for: " + identityName);
         ]]></Source>
       </Script>
-      <Transition to="Ende"/>
+      <Transition to="End"/>
     </Step>
 
-    <Step icon="Stop" name="Ende" posX="460" posY="10"/>
+    <Step icon="Stop" name="End" posX="570" posY="10"/>
   </Workflow>
 
 </sailpoint>

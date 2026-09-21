@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Correlation config for the HR source
+  ===========================================================================
+  Attaches an HR account to the identity whose employeeNumber matches;
+  left side is the identity attribute, right side the account attribute.
+
+  An authoritative source needs this as much as a target does. Without it
+  the aggregator falls back to the identity NAME, and with two people of
+  the same name the second row lands on the first person's identity
+  (measured: 100 HR links on 99 identities). With this config the second
+  row finds no identity by employeeNumber, a new one is created and the
+  HR Identity Creation rule gives it a unique name.
+
+  Same shape as 21-CorrelationConfig-LDAP.xml; imported before the
+  application that references it.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <CorrelationConfig name="HR Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="employeeNumber"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
+
+</sailpoint>

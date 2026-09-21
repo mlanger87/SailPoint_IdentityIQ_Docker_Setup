@@ -1,15 +1,23 @@
 # ===========================================================================
-# Entwicklungs-Overrides
+# Development overrides
 # ---------------------------------------------------------------------------
-# Diese Datei wird von "docker compose" AUTOMATISCH zusaetzlich gelesen.
-# Sie enthaelt Einstellungen, die man produktiv nicht haben will:
+# "docker compose" reads this file AUTOMATICALLY in addition to the base.
+# It holds settings you do not want in production:
 #
-#   - Java-Debugger-Port (JDWP) fuer Remote-Debugging aus der IDE
-#   - IIQ-Debug-Seiten
-#   - Log-Verzeichnis als Bind-Mount, damit man Logs direkt im Editor
-#     oeffnen kann
+#   - Java debugger port (JDWP) for remote debugging from the IDE
+#   - log directory as bind mount, so logs open directly in the editor
 #
-# Soll ohne diese Overrides gestartet werden:
+# NOT here: IIQ debug pages. -Dsailpoint.debugPages=true comes from
+# IIQ_EXTRA_OPTS in .env and is appended by the BASE compose file, so it
+# is on even without this override. Remove it from .env to turn it off.
+#
+# JDWP binds 0.0.0.0:8000 inside the container (it must - docker-proxy
+# connects from the bridge gateway) and is published on 127.0.0.1 only.
+# Consequence: every sibling container on iiq-net could attach a
+# debugger to the IIQ JVM. Accepted for a laptop dev stack; drop this
+# file (-f docker-compose.yml) when that is not acceptable.
+#
+# To start without these overrides:
 #     docker compose -f docker-compose.yml up -d
 # ===========================================================================
 
@@ -17,26 +25,25 @@ services:
 
   iiq:
     environment:
-      # Die Variable wird vom Tomcat-Startskript ausgewertet und an die
-      # JVM durchgereicht. suspend=n: Tomcat wartet NICHT auf den
-      # Debugger, startet also auch ohne angehaengte IDE normal.
+      # Evaluated by the Tomcat launcher and passed through to the JVM.
+      # suspend=n: Tomcat does NOT wait for the debugger and starts
+      # normally without an attached IDE.
       JPDA_ADDRESS: "0.0.0.0:8000"
       JPDA_TRANSPORT: "dt_socket"
-      # CATALINA_OPTS wird bewusst NICHT wiederholt.
+      # CATALINA_OPTS is deliberately NOT repeated here.
       #
-      # Compose ersetzt bei environment einen Schluessel vollstaendig,
-      # statt ihn zu ergaenzen. Eine Kopie hier wuerde bei jeder
-      # Aenderung an der Basis stillschweigend veralten - genau das war
-      # der Fall: -Dcom.sun.jndi.ldap.connect.pool.protocol fehlte im
-      # Normalbetrieb, weil der Override die Basis ueberschrieb.
+      # Compose replaces an environment key entirely instead of merging
+      # it. A copy here would silently go stale on every change to the
+      # base - which is exactly what happened:
+      # -Dcom.sun.jndi.ldap.connect.pool.protocol was missing in normal
+      # operation because the override overwrote the base.
       #
-      # Stattdessen haengt die Basis ${IIQ_EXTRA_OPTS} an. Der Wert
-      # steht in der .env (IIQ_EXTRA_OPTS) - Compose expandiert
-      # ${...} nur von dort, nicht aus dem environment-Block eines
-      # anderen Dienstes.
+      # Instead the base appends ${IIQ_EXTRA_OPTS}. The value lives in
+      # .env (IIQ_EXTRA_OPTS) - Compose expands ${...} only from there,
+      # not from another service's environment block.
     ports:
       - "127.0.0.1:${IIQ_DEBUG_PORT:-8000}:8000"
-    # "jpda run" aktiviert den Debug-Agenten.
+    # "jpda run" enables the debug agent.
     command: ["catalina.sh", "jpda", "run"]
     volumes:
       - ./data/objects:/data/objects:ro

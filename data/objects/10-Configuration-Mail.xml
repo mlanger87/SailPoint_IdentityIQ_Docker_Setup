@@ -2,17 +2,16 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  Mailversand auf den Mailpit-Container umlenken.
+  Redirect outbound mail to the Mailpit container.
 
-  Bewusst als ImportAction name='merge': dabei werden nur die hier
-  genannten Schluessel geaendert, der Rest der SystemConfiguration bleibt
-  unangetastet. Ein vollstaendiges Ueberschreiben wuerde bei jedem
-  IIQ-Upgrade Aerger machen.
+  Deliberately an ImportAction name='merge': only the keys listed here are
+  changed, the rest of the SystemConfiguration stays untouched. A full
+  overwrite would break on every IIQ upgrade.
 
-  Referenzprojekt A loest das per "sed" auf der init.xml - das ist
-  destruktiv und ueberlebt kein Upgrade.
+  Reference project A does this with "sed" on init.xml, which is
+  destructive and does not survive an upgrade.
 
-  Mailpit-Oberflaeche: http://localhost:8025
+  Mailpit UI: http://localhost:8025
   ===========================================================================
 -->
 <sailpoint>
@@ -26,18 +25,28 @@
           <entry key="defaultEmailFromAddress" value="identityiq@example.com"/>
           <entry key="emailNotifierType" value="smtp"/>
 
-          <!-- Keine Authentifizierung, kein TLS - Mailpit nimmt alles an. -->
+          <!-- No authentication, no TLS: Mailpit accepts everything. -->
           <entry key="smtpUser" value=""/>
           <entry key="smtpPassword" value=""/>
           <entry key="emailSSLEnabled" value="false"/>
           <entry key="emailTLSEnabled" value="false"/>
 
           <!--
-            In einer Entwicklungsumgebung sollen Mails tatsaechlich
-            verschickt werden (an Mailpit), nicht stillschweigend
-            verworfen werden.
+            In a development environment mail must actually be sent (to
+            Mailpit), not silently discarded.
           -->
           <entry key="emailRedirectAddress" value=""/>
+
+          <!--
+            Not mail, but the same merge: log every provisioning
+            transaction, not only failures. Values are the enum
+            sailpoint.object.ProvisioningTransaction$Level (Success, Retry,
+            Failure); the stock default "Failure" leaves the Provisioning
+            Transactions page empty after a perfectly good run, and the
+            page is exactly where a developer looks first when an account
+            did not appear.
+          -->
+          <entry key="provisioningTransactionLogLevel" value="Success"/>
         </Map>
       </Attributes>
     </Configuration>

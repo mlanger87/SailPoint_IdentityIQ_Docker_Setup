@@ -1,14 +1,14 @@
 #!/bin/bash
 # ===========================================================================
-# Healthcheck fuer den IdentityIQ-Container.
+# Healthcheck for the IdentityIQ container.
 #
-# Referenzprojekt C prueft nur "HEAD /identityiq" - das meldet bereits
-# "gesund", wenn Tomcat den Context ausliefert, die Anwendung aber noch
-# gar keine Datenbankverbindung hat.
+# Reference project C only checks "HEAD /identityiq" - that already
+# reports "healthy" once Tomcat serves the context, while the application
+# may still have no database connection at all.
 #
-# Hier wird die Login-Seite abgerufen. Sie wird nur dann mit HTTP 200
-# ausgeliefert, wenn die JSF-Anwendung vollstaendig hochgefahren ist -
-# und das setzt eine funktionierende Datenbankverbindung voraus.
+# Here the login page is fetched. It is served with HTTP 200 only once
+# the JSF application is fully up - which requires a working database
+# connection.
 # ===========================================================================
 set -uo pipefail
 
@@ -22,7 +22,7 @@ case "${code}" in
         exit 0
         ;;
     *)
-        echo "Healthcheck fehlgeschlagen: HTTP ${code} von ${URL}"
+        echo "Healthcheck failed: HTTP ${code} from ${URL}"
         exit 1
         ;;
 esac

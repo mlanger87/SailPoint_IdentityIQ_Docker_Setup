@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# SailPoint-Installationspakete (lizenzpflichtig - NIEMALS committen!)
+# SailPoint installation packages (licensed - never commit)
 # ---------------------------------------------------------------------------
 installer/*.zip
 installer/*.jar
@@ -8,37 +8,48 @@ installer/*.war
 SailPoint_identityiq-*.zip
 
 # ---------------------------------------------------------------------------
-# Lokale Konfiguration mit Passwoertern
+# Local configuration with credentials
 # ---------------------------------------------------------------------------
 .env
 .env.local
 
 # ---------------------------------------------------------------------------
-# Laufzeit-Artefakte
+# Runtime artifacts
 # ---------------------------------------------------------------------------
-# Logs: Inhalt ignorieren, das Verzeichnis selbst aber versionieren -
-# docker-compose.override.yml mountet es hinein.
+# Logs: ignore the contents, keep the directory - docker-compose.override.yml
+# bind-mounts it.
 data/logs/*
 !data/logs/.gitkeep
 
 data/plugins/*.zip
-data/certs/*.cer
-data/certs/*.crt
-data/certs/*.pem
+# Anything a developer drops in for an LDAPS/HTTPS test, including key
+# material that must never be committed.
+data/certs/*
+!data/certs/.gitkeep
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
 
-# IIQ-Keystore (falls site-spezifische Schluessel erzeugt werden)
+# The generated HR feed is tracked; any other CSV placed there ("let me
+# just try the real extract") is not.
+data/hr/*.csv
+!data/hr/HR-people.csv
+
+# IIQ keystore, in case site-specific keys are generated
 secrets/
 *.dat
 *.cfg
 !**/config/**/*.cfg
 
 # ---------------------------------------------------------------------------
-# Referenzprojekte (nur lokale Analyse, gehoeren nicht ins Repo)
+# Reference projects (local analysis only)
 # ---------------------------------------------------------------------------
 Other SailPoint IdentityIQ Docker Projekts als Reference/
 
 # ---------------------------------------------------------------------------
-# Betriebssystem / Editor
+# OS / editor
 # ---------------------------------------------------------------------------
 Thumbs.db
 desktop.ini
@@ -47,3 +58,4 @@ desktop.ini
 *~
 .idea/
 .vscode/
+.scratch/

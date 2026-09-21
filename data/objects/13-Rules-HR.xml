@@ -1,0 +1,92 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Rules for the HR source
+  ===========================================================================
+  Imported before 20-Application-HR.xml, which references the rule by
+  name; RuleRefs resolve at import time, so the rule must exist first.
+
+  HR Identity Creation (type IdentityCreation)
+    Runs once per NEW identity that the HR aggregation creates, after the
+    correlation config found no match. Its only job is the identity name.
+
+    Without it IIQ names the identity after the account's display
+    attribute. Measured with the default data: the CSV holds two
+    "Daniel Morgan" (1007 and 1030); the second row was attached to the
+    first identity as a second HR link, 100 links on 99 identities, and
+    one person silently vanished from every count.
+
+    Naming scheme: first.last, lower case, ASCII only; on a collision the
+    employee number is appended (daniel.morgan, daniel.morgan.1030). The
+    employee number alone would be unique as well but reads badly in the
+    UI and in every log line.
+
+    The identity's displayName stays "Daniel Morgan" for both; the UI
+    shows displayName, the name is the technical key.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <Rule language="beanshell" name="HR Identity Creation" type="IdentityCreation">
+    <Description>
+      Names a new HR identity first.last (ASCII, lower case) and appends the
+      employee number when that name is already taken.
+    </Description>
+    <Signature returnType="void">
+      <Inputs>
+        <Argument name="context" type="sailpoint.api.SailPointContext"/>
+        <Argument name="log" type="org.apache.commons.logging.Log"/>
+        <Argument name="environment" type="java.util.Map"/>
+        <Argument name="application" type="sailpoint.object.Application"/>
+        <Argument name="account" type="sailpoint.object.ResourceObject"/>
+        <Argument name="identity" type="sailpoint.object.Identity"/>
+      </Inputs>
+    </Signature>
+    <Source><![CDATA[
+      import java.text.Normalizer;
+      import sailpoint.object.Filter;
+      import sailpoint.object.Identity;
+      import sailpoint.object.QueryOptions;
+      import sailpoint.tools.Util;
+
+      // Unbound arguments are void, not null, in BeanShell.
+      if (account == void || account == null || identity == void || identity == null) {
+          return;
+      }
+
+      String toKey(Object value) {
+          if (value == null) return "";
+          String s = Normalizer.normalize(value.toString(), Normalizer.Form.NFD);
+          return s.toLowerCase().replaceAll("[^a-z0-9]", "");
+      }
+
+      String first = toKey(account.getAttribute("firstName"));
+      String last  = toKey(account.getAttribute("lastName"));
+      String empNo = toKey(account.getAttribute("employeeNumber"));
+
+      String base;
+      if (Util.isNotNullOrEmpty(first) && Util.isNotNullOrEmpty(last)) {
+          base = first + "." + last;
+      } else if (Util.isNotNullOrEmpty(last)) {
+          base = last;
+      } else {
+          base = empNo;
+      }
+      if (Util.isNullOrEmpty(base)) {
+          // Nothing usable in the row; leave IIQ's default name alone.
+          return;
+      }
+
+      String candidate = base;
+      QueryOptions qo = new QueryOptions();
+      qo.addFilter(Filter.eq("name", candidate));
+      if (context.countObjects(Identity.class, qo) > 0 && Util.isNotNullOrEmpty(empNo)) {
+          candidate = base + "." + empNo;
+      }
+
+      identity.setName(candidate);
+    ]]></Source>
+  </Rule>
+
+</sailpoint>

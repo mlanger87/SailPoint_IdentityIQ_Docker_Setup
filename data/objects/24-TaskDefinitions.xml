@@ -2,50 +2,75 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  Aufgaben fuer Aggregation und Auswertung
+  Tasks for aggregation and evaluation
   ===========================================================================
-  Die Aufgaben werden nur ANGELEGT, nicht ausgefuehrt. Gestartet werden
-  sie in der Oberflaeche unter Setup > Tasks.
+  The tasks are only CREATED, not executed. They are started in the UI
+  under Setup > Tasks.
 
-  Sinnvolle Reihenfolge beim ersten Lauf:
+  Every task carries a <Parent> pointing at the shipped template it
+  derives from and does NOT carry template="true": the task list filters
+  templates out, so a task flagged as template is invisible there and
+  can only be run from the console. Eight tasks in total; the three for
+  the SCIM and REST targets sit next to their application:
 
-    1. "HR Aggregation"          erzeugt die Identitaeten aus der CSV
-    2. "LDAP Group Aggregation"  laedt die Gruppen als Entitlements
-    3. "LDAP Account Aggregation" korreliert die Seed-Accounts
-    4. "JDBC Aggregation"        korreliert die Accounts des
-                                 zweiten Zielsystems
-    5. "Refresh Identity Cube"   wertet Rollen aus und baut die
-                                 Manager-Hierarchie auf
+    this file                  "HR Aggregation"
+                               "LDAP Group Aggregation"
+                               "LDAP Account Aggregation"
+                               "Refresh Identity Cube"
+                               "JDBC Aggregation"
+    30-Application-SCIM.xml    "SCIM Aggregation"
+    31-Application-WebService  "WebService Group Aggregation"
+                               "WebService Aggregation"
 
-  Die Gruppen VOR den Accounts zu laden ist kein Zufall: sonst verweisen
-  die Entitlements der Accounts auf noch unbekannte Gruppen und erhalten
-  keinen Anzeigenamen.
+  Sensible order for the first run:
 
-  Start aus der Konsole statt aus der Oberflaeche:
+    1. "HR Aggregation"                 creates the identities from the CSV
+    2. "LDAP Group Aggregation"         loads the groups as entitlements
+    3. "LDAP Account Aggregation"       correlates the seed accounts
+    4. "JDBC Aggregation"               correlates the accounts of the
+                                        second target system
+    5. "WebService Group Aggregation",
+       "WebService Aggregation",
+       "SCIM Aggregation"               third and fourth target system
+    6. "Refresh Identity Cube"          evaluates roles and builds the
+                                        manager hierarchy
+
+  Loading groups BEFORE accounts is no accident: otherwise the accounts'
+  entitlements reference still-unknown groups and get no display name.
+
+  Note that "import" never deletes anything: a task removed from this
+  file stays in the database until deleted by hand.
+
+  Starting from the console instead of the UI:
       run "LDAP Group Aggregation"
-  Die Anfuehrungszeichen sind Pflicht - ohne sie trennt die Konsole am
-  Leerzeichen und sucht nach einer Aufgabe namens "LDAP", was mehrdeutig
-  ist ("Ambiguous objects").
+  The quotes are mandatory; without them the console splits on the space
+  and looks for a task named "LDAP", which is ambiguous ("Ambiguous
+  objects").
   ===========================================================================
 -->
 <sailpoint>
 
   <!-- ===================================================================
-       1. HR-Aggregation - erzeugt die Identitaeten
+       1. HR aggregation: creates the identities
        =================================================================== -->
   <TaskDefinition name="HR Aggregation"
                   executor="sailpoint.task.ResourceIdentityScan"
                   progressMode="Percentage"
                   resultAction="Delete"
-                  template="true"
                   type="AccountAggregation">
-    <Description>Liest die autoritative HR-CSV und erzeugt daraus die Identitaeten.</Description>
+    <Description>Reads the authoritative HR CSV and creates the identities from it.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="HR-Application"/>
         <!--
-          Pflicht bei einer autoritativen Quelle: erst damit legt IIQ
-          fuer eine unbekannte Personalnummer eine neue Identitaet an.
+          Detects deleted accounts: a row that vanished from the CSV
+          marks its link for removal on the next run. It has nothing to
+          do with creating identities; those are created for every
+          unknown employee number anyway because the application is
+          authoritative.
         -->
         <entry key="checkDeleted">
           <value>
@@ -62,6 +87,39 @@
             <Boolean>true</Boolean>
           </value>
         </entry>
+        <!--
+          Must be set EXPLICITLY to false. ResourceIdentityScan.execute
+          puts noManagerCorrelation=true whenever the key is absent, so
+          the executor default is "no manager lookup"; the UI writes the
+          false when the "Disable manager lookup" box is left unticked,
+          a hand-written task does not. Without this entry the debug
+          log shows "Ignoring promotion of manager attribute" for every
+          account and the hierarchy stays empty, silently. The second
+          half of the fix is the manager source in
+          23-ObjectConfig-Identity.xml.
+        -->
+        <entry key="noManagerCorrelation">
+          <value>
+            <Boolean>false</Boolean>
+          </value>
+        </entry>
+        <!--
+          Identitizer.promoteAttribute correlates the manager only when
+          the feed value (managerEmployeeNumber) differs from what the
+          link carried last time. On a fresh database that is always the
+          case; on a database that was aggregated before the source was
+          configured it never is, and the hierarchy stays empty although
+          everything else is now right. alwaysRefreshManager removes
+          that condition. Cost: one lookup per account, negligible.
+          Measured: 1 of 92 managers resolved without it, 91 with it
+          (two HR rows share one identity, see the Daniel Morgan note in
+          20-Application-HR.xml).
+        -->
+        <entry key="alwaysRefreshManager">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
       </Map>
     </Attributes>
     <Owner>
@@ -70,26 +128,27 @@
   </TaskDefinition>
 
   <!-- ===================================================================
-       2. LDAP-Gruppenaggregation - laedt die Entitlements
+       2. LDAP group aggregation: loads the entitlements
        =================================================================== -->
   <TaskDefinition name="LDAP Group Aggregation"
                   executor="sailpoint.task.ResourceIdentityScan"
                   progressMode="String"
                   resultAction="Delete"
                   subType="task_item_type_acct_grp_aggregation"
-                  template="true"
                   type="AccountGroupAggregation">
-    <Description>Laedt die LDAP-Gruppen als Entitlements. Vor der Account-Aggregation ausfuehren.</Description>
+    <Description>Loads the LDAP groups as entitlements. Run before the account aggregation.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Group Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="LDAP-Target"/>
         <!--
-          Entscheidend: derselbe Executor wie bei der
-          Account-Aggregation, unterschieden wird ueber aggregationType.
-          Die in aelteren Beispielen genannte Klasse
-          sailpoint.task.AccountGroupScan gibt es in 8.5 nicht mehr -
-          die Aufgabe endet dann mit "Error" und als einzige Meldung
-          dem Klassennamen.
+          Crucial: the same executor as for account aggregation,
+          distinguished via aggregationType. The class
+          sailpoint.task.AccountGroupScan named in older examples no
+          longer exists in 8.5; the task then ends with "Error" and the
+          class name as the only message.
         -->
         <entry key="aggregationType" value="group"/>
       </Map>
@@ -100,27 +159,39 @@
   </TaskDefinition>
 
   <!-- ===================================================================
-       3. LDAP-Accountaggregation - korreliert die Seed-Accounts
+       3. LDAP account aggregation: correlates the seed accounts
        =================================================================== -->
   <TaskDefinition name="LDAP Account Aggregation"
                   executor="sailpoint.task.ResourceIdentityScan"
                   progressMode="Percentage"
                   resultAction="Delete"
-                  template="true"
                   type="AccountAggregation">
-    <Description>Liest die LDAP-Accounts und korreliert sie ueber employeeNumber an die HR-Identitaeten.</Description>
+    <Description>Reads the LDAP accounts and correlates them to the HR identities via employeeNumber.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="LDAP-Target"/>
+        <!--
+          A target keeps accounts that were deleted natively unless this is
+          set; the stock template leaves it false. Measured: 85 entries removed
+          from the directory, aggregation "Success", 90 links still there.
+        -->
+        <entry key="checkDeleted">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
         <entry key="correlateEntitlements">
           <value>
             <Boolean>true</Boolean>
           </value>
         </entry>
         <!--
-          Bewusst NICHT gesetzt: promoteAttributes. Das Zielsystem ist
-          nicht autoritativ, seine Attribute sollen die HR-Werte auf der
-          Identitaet nicht ueberschreiben.
+          Deliberately NOT set: promoteAttributes. The target system is
+          not authoritative; its attributes must not overwrite the HR
+          values on the identity.
         -->
       </Map>
     </Attributes>
@@ -130,15 +201,17 @@
   </TaskDefinition>
 
   <!-- ===================================================================
-       4. Identity Refresh - Rollen und Hierarchie
+       4. Identity refresh: roles and hierarchy
        =================================================================== -->
   <TaskDefinition name="Refresh Identity Cube"
                   executor="sailpoint.task.IdentityRefreshExecutor"
                   progressMode="Percentage"
                   resultAction="Delete"
-                  template="true"
                   type="Identity">
-    <Description>Wertet Rollenzuweisungen aus, baut die Manager-Hierarchie auf und aktualisiert die Identitaeten.</Description>
+    <Description>Evaluates role assignments, builds the manager hierarchy and refreshes the identities.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Identity Refresh"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="refreshIdentityEntitlements">
@@ -152,13 +225,15 @@
           </value>
         </entry>
         <!--
-          Wertet die Selectors der Bundles aus und weist die Rollen zu.
-          Die Option heisst refreshRoleMetadata - ein in Beispielen
-          verbreitetes refreshAssignedRoles gibt es in 8.5 NICHT. Eine
-          unbekannte Option wird stillschweigend ignoriert: die Aufgabe
-          endet mit Success, nur passiert nichts.
+          Role assignment (evaluating the bundles' selectors) is done by
+          correlateEntitlements below. refreshRoleMetadata only refreshes
+          the role statistics and metadata; it is kept because the role
+          pages show member counts from it. The refreshAssignedRoles seen
+          in many examples does NOT exist in 8.5. An unknown option is
+          silently ignored: the task ends with Success, it just does
+          nothing.
 
-          Die gueltigen Optionen listet:
+          The valid options are listed by:
               get TaskDefinition "Identity Refresh"
         -->
         <entry key="refreshRoleMetadata">
@@ -177,8 +252,8 @@
           </value>
         </entry>
         <!--
-          Provisioniert, was sich aus den Rollen ergibt. Damit legt ein
-          Refresh nach einer Rollenzuweisung den LDAP-Account an.
+          Provisions whatever results from the roles. With this a refresh
+          after a role assignment creates the LDAP account.
         -->
         <entry key="provision">
           <value>
@@ -186,9 +261,9 @@
           </value>
         </entry>
         <!--
-          Verarbeitet die Lifecycle-Events (Joiner, Leaver). Ohne diesen
-          Schalter werden die Trigger zwar ausgewertet, aber kein
-          Workflow gestartet - die Ereignisse verpuffen dann still.
+          Processes the lifecycle events (joiner, leaver). Without this
+          switch the triggers are evaluated but no workflow is started;
+          the events fizzle out silently.
         -->
         <entry key="processTriggers">
           <value>
@@ -203,18 +278,30 @@
   </TaskDefinition>
 
   <!-- ===================================================================
-       5. JDBC-Aggregation - zweites Zielsystem
+       5. JDBC aggregation: second target system
        =================================================================== -->
   <TaskDefinition name="JDBC Aggregation"
                   executor="sailpoint.task.ResourceIdentityScan"
                   progressMode="Percentage"
                   resultAction="Delete"
-                  template="true"
                   type="AccountAggregation">
-    <Description>Liest die Accounts aus der Zieldatenbank targetdb und korreliert sie ueber IIQID.</Description>
+    <Description>Reads the accounts from the target database targetdb and correlates them via IIQID.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="JDBC-Target"/>
+        <!--
+          A target keeps accounts that were deleted natively unless this is
+          set; the stock template leaves it false. Measured: 85 entries removed
+          from the directory, aggregation "Success", 90 links still there.
+        -->
+        <entry key="checkDeleted">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
         <entry key="correlateEntitlements">
           <value>
             <Boolean>true</Boolean>

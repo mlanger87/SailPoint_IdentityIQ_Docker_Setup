@@ -2,32 +2,31 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  LDAP-Applikation - das Zielsystem
+  LDAP application: the target system
   ===========================================================================
-  Nicht authoritative: dieses Verzeichnis erzeugt keine Identitaeten,
-  sondern nimmt Accounts auf, die IdentityIQ dort anlegt.
+  Not authoritative: this directory does not create identities, it
+  receives the accounts IdentityIQ creates there.
 
-  Die Struktur folgt einem Export aus einer 8.5-Instanz. Abweichungen
-  davon, jeweils an unser Verzeichnis angepasst:
+  The structure follows an export from an 8.5 instance. Deviations, each
+  adapted to our directory:
 
-    - Gruppen-Schema: der Export nutzte groupOfUniqueNames mit
-      uniqueMember. Unser OpenLDAP fuehrt die Gruppen als groupOfNames
-      mit member. Wuerde man das uebernehmen, faende die
-      Gruppenaggregation nichts.
+    - Group schema: the export used groupOfUniqueNames with uniqueMember.
+      Our OpenLDAP holds groups as groupOfNames with member. Taking the
+      export as-is, group aggregation would find nothing.
 
-    - host/port: openldap:1389 statt host.example.com:389 (der
-      Container-Name im Docker-Netz, nicht localhost).
+    - host/port: openldap:1389 instead of host.example.com:389 (the
+      container name on the Docker network, not localhost).
 
-    - password: im Klartext. Der Export enthielt einen verschluesselten
-      Wert (1:ACP:...), der an den Keystore der Ursprungsinstanz gebunden
-      und hier wertlos waere. Siehe CLAUDE.md zur Entscheidung gegen
-      iiq encrypt in dieser Dev-Umgebung.
+    - password: in clear text. The export held an encrypted value
+      (1:ACP:...), bound to the keystore of the source instance and
+      worthless here. See CLAUDE.md on the decision against iiq encrypt
+      in this dev environment.
 
-    - searchDNs: die 8.5-Struktur (Liste von Maps) wurde uebernommen,
-      mit ou=people als Suchbereich.
+    - searchDNs: the 8.5 structure (list of maps) was kept, with
+      ou=people as search base.
 
-  Der Platzhalter cn=placeholder,dc=example,dc=com liegt ausserhalb von
-  ou=people und faellt damit nicht in die Account-Aggregation.
+  The placeholder cn=placeholder,dc=example,dc=com sits outside ou=people
+  and is therefore not picked up by account aggregation.
   ===========================================================================
 -->
 <sailpoint>
@@ -40,10 +39,10 @@
                type="LDAP">
 
     <!--
-      Korrelation gegen die HR-Identitaeten. Bewusst ueber
-      employeeNumber und nicht ueber cn: Namen sind nicht eindeutig
-      (es gibt hier bereits zwei Personen mit gleichem Namensmuster)
-      und aendern sich bei Heirat oder Namenswechsel.
+      Correlation against the HR identities. Deliberately on
+      employeeNumber, not on cn: names are not unique (there are already
+      two people here with the same name pattern) and they change on
+      marriage or renaming.
     -->
     <AccountCorrelationConfig>
       <Reference class="sailpoint.object.CorrelationConfig"
@@ -73,7 +72,7 @@
           </value>
         </entry>
 
-        <!-- 8.5-Struktur: Liste von Maps statt eines flachen searchDN. -->
+        <!-- 8.5 structure: list of maps instead of a flat searchDN. -->
         <entry key="searchDNs">
           <value>
             <List>
@@ -106,6 +105,28 @@
           </value>
         </entry>
 
+        <!--
+          Enable/Disable (UI section "Enable Disable Configuration").
+          OpenLDAP has no account flag; the ppolicy overlay's
+          pwdAccountLockedTime with the magic value 000001010000Z locks an
+          entry permanently. Disable and Enable are configured separately
+          and each fails with "No revoke/restore attribute is specified"
+          when its three entries are missing. Action semantics from the
+          connector's disableObject()/enableObject(): "add" -> Add,
+          "replace" -> Set (Remove if the value is empty), anything else
+          -> Remove of that value. Enable therefore removes exactly the
+          value Disable set.
+          Requires LDAP_CONFIGURE_PPOLICY=yes on the openldap container;
+          measured without it: "attribute type undefined" and the leaver's
+          LDAP disable fails while the REST target is disabled fine.
+        -->
+        <entry key="revokeAttr" value="pwdAccountLockedTime"/>
+        <entry key="revokeVal" value="000001010000Z"/>
+        <entry key="revokeAction" value="replace"/>
+        <entry key="restoreAttr" value="pwdAccountLockedTime"/>
+        <entry key="restoreVal" value="000001010000Z"/>
+        <entry key="restoreAction" value="remove"/>
+
         <entry key="templateApplication" value="LDAP Template"/>
         <entry key="sysDescriptions">
           <value>
@@ -122,12 +143,20 @@
     </Owner>
 
     <!--
-      Create-Policy: leitet die Account-Attribute aus der Identitaet ab.
-      Ohne sie laesst sich zwar aggregieren, aber kein Account anlegen -
-      IIQ wuesste nicht, welchen DN der neue Eintrag bekommen soll.
+      Create policy: derives the account attributes from the identity.
+      Without it aggregation works, but no account can be created: IIQ
+      would not know which DN the new entry should get.
 
-      Der DN folgt dem Muster der Seed-Accounts (uid=<name>,ou=people),
-      damit provisionierte und bestehende Accounts gleich aussehen.
+      The DN follows the pattern of the seed accounts
+      (uid=<name>,ou=people) so that provisioned and pre-existing accounts
+      look alike. The name itself comes from the shared FieldValue rule
+      "HR Derive Account Name" (12-Rules-Lifecycle.xml), which also
+      handles collisions; the JDBC policy uses the same rule.
+
+      The fields title, departmentNumber, ou, l, employeeType,
+      telephoneNumber and description mirror what the seed accounts
+      carry, so a provisioned entry is indistinguishable from a seeded
+      one.
     -->
     <ProvisioningForms>
       <Form name="Account" objectType="account" type="Create">
@@ -142,18 +171,21 @@
                  name="dn" required="true" type="string">
             <Script>
               <Source><![CDATA[
-                // uid aus Vor- und Nachname: erster Buchstabe des
-                // Vornamens plus Nachname, kleingeschrieben - dasselbe
-                // Muster wie bei den Seed-Accounts.
-                String first = identity.getFirstname();
-                String last  = identity.getLastname();
-                String uid;
-                if (first != null && first.length() > 0 && last != null) {
-                    uid = (first.substring(0, 1) + last).toLowerCase();
-                } else {
-                    uid = identity.getName().toLowerCase();
-                }
-                uid = uid.replaceAll("[^a-z0-9]", "");
+                // Same rule, same arguments as the uid field below, so
+                // the RDN and the uid attribute cannot diverge.
+                import java.util.HashMap;
+                import java.util.Map;
+                import sailpoint.object.Rule;
+
+                Map args = new HashMap();
+                args.put("identity", identity);
+                if (application != void) { args.put("application", application); }
+                if (field != void)       { args.put("field", field); }
+                if (form != void)        { args.put("form", form); }
+                if (current != void)     { args.put("current", current); }
+
+                Rule rule = context.getObjectByName(Rule.class, "HR Derive Account Name");
+                String uid = (String) context.runRule(rule, args);
                 return "uid=" + uid + ",ou=people,dc=example,dc=com";
               ]]></Source>
             </Script>
@@ -164,9 +196,9 @@
                  name="password" required="true" type="secret">
             <Script>
               <Source><![CDATA[
-                // Startpasswort. In einer Dev-Umgebung fest; produktiv
-                // waere hier eine Passwortregel oder ein Zufallswert
-                // mit anschliessendem Versand richtig.
+                // Initial password. Fixed in a dev environment; in
+                // production this would be a password policy or a random
+                // value with subsequent delivery.
                 return "Start123!";
               ]]></Source>
             </Script>
@@ -201,9 +233,9 @@
           </Field>
 
           <!--
-            Ohne objectClass lehnt OpenLDAP den Eintrag ab. inetOrgPerson
-            setzt organizationalPerson, person und top voraus, deshalb
-            muessen alle vier angegeben werden.
+            Without objectClass OpenLDAP rejects the entry. inetOrgPerson
+            requires organizationalPerson, person and top, so all four
+            must be listed.
           -->
           <Field name="objectClass" multi="true" type="string">
             <Script>
@@ -219,19 +251,9 @@
           </Field>
 
           <Field name="uid" type="string">
-            <Script>
-              <Source><![CDATA[
-                String first = identity.getFirstname();
-                String last  = identity.getLastname();
-                String uid;
-                if (first != null && first.length() > 0 && last != null) {
-                    uid = (first.substring(0, 1) + last).toLowerCase();
-                } else {
-                    uid = identity.getName().toLowerCase();
-                }
-                return uid.replaceAll("[^a-z0-9]", "");
-              ]]></Source>
-            </Script>
+            <RuleRef>
+              <Reference class="sailpoint.object.Rule" name="HR Derive Account Name"/>
+            </RuleRef>
           </Field>
 
           <Field name="mail" type="string">
@@ -243,10 +265,55 @@
           <Field name="employeeNumber" type="string">
             <Script>
               <Source><![CDATA[
-                // Traegt den Korrelationsschluessel gleich mit ein -
-                // sonst korrelierte der neu angelegte Account bei der
-                // naechsten Aggregation nicht zurueck.
+                // Writes the correlation key right away; otherwise the
+                // newly created account would not correlate back on the
+                // next aggregation.
                 return identity.getStringAttribute("employeeNumber");
+              ]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="title" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("jobTitle");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="departmentNumber" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("department");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="ou" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("department");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="l" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("location");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="employeeType" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("employeeType");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="telephoneNumber" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("phone");]]></Source>
+            </Script>
+          </Field>
+
+          <Field name="description" type="string">
+            <Script>
+              <Source><![CDATA[
+                String cc = identity.getStringAttribute("costCentre");
+                return (cc != null) ? "Cost centre " + cc : null;
               ]]></Source>
             </Script>
           </Field>
@@ -288,10 +355,9 @@
 
     <Schemas>
       <!--
-        Account-Schema. Gegenueber dem vollstaendigen Export auf die
-        Attribute gekuerzt, die im Verzeichnis tatsaechlich vorkommen -
-        der Export fuehrt rund 40 inetOrgPerson-Attribute auf, von denen
-        die meisten hier leer blieben.
+        Account schema. Trimmed against the full export to the attributes
+        that actually occur in the directory; the export lists around 40
+        inetOrgPerson attributes, most of which would stay empty here.
       -->
       <Schema displayAttribute="cn"
               identityAttribute="dn"
@@ -302,67 +368,67 @@
           <Description>Distinguished Name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="uid" type="string">
-          <Description>Benutzerkennung</Description>
+          <Description>User ID</Description>
         </AttributeDefinition>
         <AttributeDefinition name="cn" type="string">
-          <Description>Vollstaendiger Name</Description>
+          <Description>Full name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="sn" type="string">
-          <Description>Nachname</Description>
+          <Description>Last name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="givenName" type="string">
-          <Description>Vorname</Description>
+          <Description>First name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="mail" type="string">
-          <Description>Mailadresse</Description>
+          <Description>E-mail address</Description>
         </AttributeDefinition>
         <AttributeDefinition name="employeeNumber" type="string">
-          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+          <Description>Employee number, the correlation key</Description>
         </AttributeDefinition>
         <AttributeDefinition name="employeeType" type="string">
-          <Description>Hierarchieebene</Description>
+          <Description>Hierarchy level</Description>
         </AttributeDefinition>
         <AttributeDefinition name="title" type="string">
-          <Description>Funktionsbezeichnung</Description>
+          <Description>Job title</Description>
         </AttributeDefinition>
         <AttributeDefinition name="departmentNumber" type="string">
-          <Description>Abteilung</Description>
+          <Description>Department</Description>
         </AttributeDefinition>
         <AttributeDefinition name="ou" type="string">
-          <Description>Organisationseinheit</Description>
+          <Description>Organizational unit</Description>
         </AttributeDefinition>
         <AttributeDefinition name="l" type="string">
-          <Description>Standort</Description>
+          <Description>Location</Description>
         </AttributeDefinition>
         <AttributeDefinition name="telephoneNumber" type="string">
-          <Description>Telefonnummer</Description>
+          <Description>Phone number</Description>
         </AttributeDefinition>
         <AttributeDefinition name="description" type="string">
-          <Description>Beschreibung</Description>
+          <Description>Description</Description>
         </AttributeDefinition>
         <AttributeDefinition name="manager" type="string">
-          <Description>DN des Vorgesetzten</Description>
+          <Description>DN of the manager</Description>
         </AttributeDefinition>
         <AttributeDefinition multi="true" name="objectClass" type="string">
-          <Description>Objektklassen des Eintrags</Description>
+          <Description>Object classes of the entry</Description>
         </AttributeDefinition>
         <AttributeDefinition entitlement="true" managed="true" multi="true"
                              name="groups" schemaObjectType="group" type="string">
-          <Description>Gruppenmitgliedschaften - die Entitlements</Description>
+          <Description>Group memberships, the entitlements</Description>
         </AttributeDefinition>
       </Schema>
 
       <!--
-        Gruppen-Schema. WICHTIG: groupOfNames mit member.
+        Group schema. IMPORTANT: groupOfNames with member.
 
-        Der 8.5-Export nutzte groupOfUniqueNames mit uniqueMember. Das
-        passt zu Verzeichnissen, die diese Klasse fuehren - unseres nutzt
-        groupOfNames. Beide Werte muessen zusammenpassen, sonst liefert
-        die Gruppenaggregation kein Ergebnis.
+        The 8.5 export used groupOfUniqueNames with uniqueMember. That
+        suits directories carrying that class; ours uses groupOfNames.
+        Both values must match, otherwise group aggregation returns
+        nothing.
 
-        GROUPS_HAVE_MEMBERS sorgt dafuer, dass IIQ die Mitgliedschaft
-        ueber die Gruppe aufloest und nicht ueber ein Attribut am Account:
-        bei groupOfNames steht die Beziehung an der Gruppe.
+        GROUPS_HAVE_MEMBERS makes IIQ resolve membership through the group
+        rather than through an attribute on the account: with
+        groupOfNames the relationship lives on the group.
       -->
       <Schema descriptionAttribute="description"
               displayAttribute="cn"
@@ -375,13 +441,13 @@
           <Description>Distinguished Name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="cn" type="string">
-          <Description>Gruppenname</Description>
+          <Description>Group name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="description" type="string">
-          <Description>Beschreibung der Berechtigung</Description>
+          <Description>Description of the entitlement</Description>
         </AttributeDefinition>
         <AttributeDefinition name="owner" type="string">
-          <Description>Eigentuemer</Description>
+          <Description>Owner</Description>
         </AttributeDefinition>
         <Attributes>
           <Map>

@@ -1,13 +1,13 @@
 # ===========================================================================
-# SailPoint IdentityIQ 8.5 - lokale Entwicklungsumgebung
+# SailPoint IdentityIQ 8.5 - local development environment
 # ---------------------------------------------------------------------------
 # Start:   docker compose up -d
 # Status:  docker compose ps
 # Logs:    docker compose logs -f iiq
 # Reset:   docker compose down -v
 #
-# Kein "version:"-Schluessel - der ist in der Compose-Spezifikation
-# veraltet und erzeugt bei aktuellen Versionen eine Warnung.
+# No "version:" key - deprecated in the Compose spec, current versions
+# emit a warning.
 # ===========================================================================
 
 name: iiq85
@@ -17,10 +17,10 @@ services:
   # -------------------------------------------------------------------------
   # PostgreSQL 17
   #
-  # Das Schema wird beim allerersten Start ueber die von SailPoint
-  # ausgelieferte DDL angelegt (siehe docker/postgres/Dockerfile).
-  # Wichtig: POSTGRES_DB wird bewusst NICHT gesetzt - die DDL legt alle
-  # drei Datenbanken selbst an.
+  # Schema is created on the very first start from SailPoint's shipped DDL
+  # (see docker/postgres/Dockerfile).
+  # POSTGRES_DB is deliberately NOT set - the DDL creates all three
+  # databases itself.
   # -------------------------------------------------------------------------
   postgres:
     build:
@@ -36,42 +36,44 @@ services:
         IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
     image: iiq-postgres:${IIQ_VERSION:-8.5}
     container_name: iiq-postgres
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # Beschleunigt initdb; fuer eine Dev-Datenbank unproblematisch.
+      # Speeds up initdb; harmless for a dev database.
       POSTGRES_INITDB_ARGS: "--data-checksums"
     ports:
-      # An 127.0.0.1 gebunden, nicht an alle Schnittstellen.
+      # Bound to 127.0.0.1, not to all interfaces.
       #
-      # Docker veroeffentlicht Ports ohne Praefix auf 0.0.0.0 - die
-      # Datenbank waere dann im gesamten Netz erreichbar, etwa im
-      # Kundennetz oder im Hotel-WLAN. Mit dem Praefix bleibt der
-      # Zugriff vom eigenen Rechner moeglich, von aussen nicht.
+      # Docker publishes unprefixed ports on 0.0.0.0 - the database would
+      # be reachable from the whole network (customer LAN, hotel Wi-Fi).
+      # With the prefix it stays reachable from this machine only.
       #
-      # Gilt fuer alle Dienste hier; die Umgebung ist ausschliesslich
-      # fuer die lokale Entwicklung gedacht.
+      # Applies to every service here; this environment is for local
+      # development only.
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      # Named Volume statt Bind-Mount: unter Windows deutlich schneller
-      # als ein NTFS-Mount ueber gRPC-FUSE.
+      # Named volume instead of bind mount: on Windows this is far faster
+      # than an NTFS mount via gRPC-FUSE.
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d identityiq"]
       interval: 10s
       timeout: 5s
       retries: 30
-      # Die Schema-DDL hat 9.146 Zeilen und legt 250+ Tabellen an.
+      # The schema DDL is 9,146 lines and creates 250+ tables.
       start_period: 120s
     restart: unless-stopped
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # Init-Container
+  # Init container
   #
-  # Laeuft einmal durch und beendet sich. Erst danach startet der
-  # eigentliche IIQ-Dienst (depends_on: service_completed_successfully).
-  # Der Import ist idempotent - ein erneuter Lauf erkennt am
-  # Datenbankzustand, dass bereits initialisiert wurde.
+  # Runs once and exits. Only then does the actual IIQ service start
+  # (depends_on: service_completed_successfully). The import is
+  # idempotent - a re-run detects from the database state that
+  # initialization already happened.
   # -------------------------------------------------------------------------
   iiq-init:
     build: &iiq-build
@@ -90,6 +92,11 @@ services:
         IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
     image: iiq-app:${IIQ_VERSION:-8.5}
     container_name: iiq-init
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
+    # Own image, uid 1000, binds >1024, needs no capability at all.
+    cap_drop: [ALL]
     environment:
       INIT: "y"
       DB_HOST: postgres
@@ -98,51 +105,54 @@ services:
       - ./data/objects:/data/objects:ro
       - ./data/plugins:/data/plugins:ro
       - ./data/certs:/data/certs:ro
-      # Autoritative HR-Quelle fuer den DelimitedFile-Connector.
-      # Bewusst schreibbar: so laesst sich die Datei auch aus dem
-      # Container heraus ergaenzen. Der Pfad hier ist der, der in der
-      # Application unter "file" steht.
+      # Authoritative HR source for the DelimitedFile connector.
+      # Deliberately writable so the file can be extended from inside
+      # the container. This path is what the Application's "file"
+      # attribute points to.
       - ./data/hr:/data/hr
     depends_on:
       postgres:
         condition: service_healthy
-    # Im Init-Container laeuft kein Tomcat - der aus dem Image geerbte
-    # HTTP-Healthcheck wuerde den Container dauerhaft als "unhealthy"
-    # markieren.
+    # No Tomcat runs in the init container - the HTTP healthcheck
+    # inherited from the image would mark it permanently "unhealthy".
     healthcheck:
       disable: true
     restart: "no"
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # IdentityIQ auf Tomcat 9 / OpenJDK 21
+  # IdentityIQ on Tomcat 9 / OpenJDK 21
   # -------------------------------------------------------------------------
   iiq:
     build: *iiq-build
     image: iiq-app:${IIQ_VERSION:-8.5}
     container_name: iiq
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
+    # Own image, uid 1000, binds >1024, needs no capability at all.
+    cap_drop: [ALL]
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
-      # Diese Flags MUESSEN hier stehen: das Startskript WEB-INF/bin/iiq
-      # setzt sie ab Java 17 zwar selbst, Tomcat erbt davon aber nichts.
-      # --add-exports ist laut Installation Guide (S.6) fuer JDK 17+
-      # zwingend; ohne --add-opens scheitern Teile von Hibernate/Spring
-      # unter Java 21 am staerkeren Modulschutz.
-      # HINWEIS: In einem YAML-Faltblock (>-) gibt es KEINE Kommentare -
-      # eine #-Zeile darin wuerde Teil des Wertes und landet als
-      # Argument bei der JVM. Erlaeuterungen gehoeren deshalb hierher.
+      # These flags MUST live here: the launcher WEB-INF/bin/iiq sets
+      # them itself from Java 17 on, but Tomcat inherits nothing from it.
+      # --add-exports is mandatory for JDK 17+ per Installation Guide
+      # (p.6); without --add-opens, parts of Hibernate/Spring fail under
+      # Java 21's stricter module encapsulation.
+      # NOTE: a YAML folded block (>-) has NO comments - a # line inside
+      # becomes part of the value and is passed to the JVM as an
+      # argument. Explanations belong here, above the block.
       #
-      # Nicht gesetzt ist com.sun.jndi.ldap.connect.pool.protocol: Der
-      # Wert waere "plain ssl" - mit Leerzeichen, und das laesst sich
-      # im Faltblock nicht uebergeben. Ohne Anfuehrungszeichen wird
-      # "ssl" ein eigenes Argument (Java: "Could not find or load main
-      # class ssl"), mit Anfuehrungszeichen landen diese als Literale
-      # im Wert. Beides verhindert den Start.
+      # Not set: com.sun.jndi.ldap.connect.pool.protocol. Its value would
+      # be "plain ssl" - with a space, which cannot be passed inside a
+      # folded block. Unquoted, "ssl" becomes a separate argument (Java:
+      # "Could not find or load main class ssl"); quoted, the quotes end
+      # up as literals in the value. Either way Tomcat fails to start.
       #
-      # Die Option steuert nur das Pooling fuer LDAPS-Verbindungen und
-      # ist in einer Dev-Umgebung entbehrlich. Wer sie braucht, setzt
-      # sie ueber JAVA_TOOL_OPTIONS im environment-Block.
+      # The option only controls pooling for LDAPS connections and is
+      # dispensable in a dev environment. If needed, set it via
+      # JAVA_TOOL_OPTIONS in the environment block.
       CATALINA_OPTS: >-
         -Xms1g
         -Xmx${IIQ_HEAP:-4g}
@@ -161,10 +171,10 @@ services:
       - ./data/objects:/data/objects:ro
       - ./data/plugins:/data/plugins:ro
       - ./data/certs:/data/certs:ro
-      # Autoritative HR-Quelle fuer den DelimitedFile-Connector.
-      # Bewusst schreibbar: so laesst sich die Datei auch aus dem
-      # Container heraus ergaenzen. Der Pfad hier ist der, der in der
-      # Application unter "file" steht.
+      # Authoritative HR source for the DelimitedFile connector.
+      # Deliberately writable so the file can be extended from inside
+      # the container. This path is what the Application's "file"
+      # attribute points to.
       - ./data/hr:/data/hr
     depends_on:
       postgres:
@@ -175,20 +185,22 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # Mailpit - faengt alle von IIQ versendeten Mails ab
+  # Mailpit - catches every mail IIQ sends
   #
-  # SMTP laeuft nur containerintern auf 1025; nach aussen ist nur die
-  # Weboberflaeche sichtbar. Damit gibt es keinen Konflikt mit Port 25
-  # auf dem Windows-Host.
+  # SMTP runs container-internal only on 1025; only the web UI is
+  # published. No conflict with port 25 on the Windows host.
   # -------------------------------------------------------------------------
   mailpit:
     image: axllent/mailpit:v1.21
-    # platform explizit setzen: Das Manifest dieses Images listet linux/386
-    # VOR linux/amd64. Mit dem containerd-Image-Store waehlt Docker sonst
-    # die 386-Variante, deren 32-Bit-Binaries im Container mit
-    # "exec /mailpit: exec format error" scheitern.
+    # Explicit platform: this image's manifest lists linux/386 BEFORE
+    # linux/amd64. With the containerd image store Docker otherwise picks
+    # the 386 variant, whose 32-bit binaries fail in the container with
+    # "exec /mailpit: exec format error".
     platform: linux/amd64
     container_name: iiq-mailpit
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "1"
       MP_SMTP_AUTH_ALLOW_INSECURE: "1"
@@ -204,38 +216,46 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # OpenLDAP - Testverzeichnis fuer Aggregation und Provisionierung
+  # OpenLDAP - test directory for aggregation and provisioning
   #
-  # Zur Image-Wahl: Ein offizielles OpenLDAP-Image gibt es nicht.
-  #   - osixia/openldap (in drei der vier Referenzprojekte verwendet)
-  #     wird seit Jahren nicht mehr gepflegt; letzter Stand 1.5.0.
-  #   - bitnami/openldap wurde 2025 nach bitnamilegacy verschoben und
-  #     bekommt dort keine Updates mehr, ist aber inhaltlich aktuell
-  #     (OpenLDAP 2.6.10 auf Debian 12).
+  # Image choice: there is no official OpenLDAP image.
+  #   - osixia/openldap (used in three of the four reference projects)
+  #     has been unmaintained for years; last release 1.5.0.
+  #   - bitnami/openldap moved to bitnamilegacy in 2025 and receives no
+  #     further updates there, but is current in content
+  #     (OpenLDAP 2.6.10 on Debian 12).
   #
-  # Fuer ein lokales Testverzeichnis ist der eingefrorene Stand
-  # vertretbar - der Dienst ist nicht nach aussen exponiert. Fuer
-  # produktionsnahe Umgebungen waere ein selbst gebautes Image oder
-  # ein echtes Verzeichnis vorzuziehen.
+  # For a local test directory the frozen state is acceptable - the
+  # service is not exposed externally. For production-like setups, a
+  # self-built image or a real directory would be preferable.
   # -------------------------------------------------------------------------
   openldap:
     image: bitnamilegacy/openldap:2.6.10-debian-12-r4
     container_name: iiq-openldap
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
     environment:
       LDAP_ROOT: ${LDAP_ROOT:-dc=example,dc=com}
       LDAP_ADMIN_USERNAME: ${LDAP_ADMIN_USER:-admin}
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-adminpassword}
       LDAP_SKIP_DEFAULT_TREE: "yes"
       LDAP_CUSTOM_LDIF_DIR: /ldifs
+      # Loads the ppolicy module and overlay so that pwdAccountLockedTime
+      # exists; that is the attribute the IIQ LDAP connector sets on
+      # Disable (revokeAttr in 22-Application-LDAP.xml). Without it the
+      # leaver's disable fails with "attribute type undefined".
+      # Config is written on first init: change needs a fresh ldapdata volume.
+      LDAP_CONFIGURE_PPOLICY: "yes"
     ports:
       - "127.0.0.1:${LDAP_PORT:-1389}:1389"
     volumes:
       - ./docker/openldap/ldif:/ldifs:ro
       - ldapdata:/bitnami/openldap
-    # Beim ersten Start laedt das Image zusaetzlich die LDIFs ein. Ohne
-    # diesen Healthcheck gilt der Container schon als bereit, waehrend
-    # das Verzeichnis noch leer ist - ldap-ui zeigt dann einen leeren
-    # Baum, und eine Aggregation liefe ins Nichts.
+    # On first start the image additionally loads the LDIFs. Without this
+    # healthcheck the container counts as ready while the directory is
+    # still empty - ldap-ui shows an empty tree and an aggregation would
+    # run against nothing.
     healthcheck:
       test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:1389 -b '${LDAP_ROOT:-dc=example,dc=com}' -s base >/dev/null 2>&1"]
       interval: 10s
@@ -246,19 +266,18 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # Mock-REST-API - viertes Zielsystem, fuer den Web-Services-Connector
+  # Mock REST API - fourth target system, for the Web Services connector
   #
-  # Bildet eine gewoehnliche Personalverwaltungs-API nach: verschachtelte
-  # Antworten (data[]/meta{}), offset-Paging, Bearer-Token, eigenes
-  # Fehlerformat. Bewusst NICHT SCIM - dafuer gibt es den Dienst "scim".
+  # Emulates an ordinary HR-management API: nested responses
+  # (data[]/meta{}), offset paging, bearer token, its own error format.
+  # Deliberately NOT SCIM - that is what the "scim" service is for.
   #
-  # Genau an diesen Eigenheiten haengt die Anbindung in echten Projekten:
-  # rootPath muss auf data zeigen, das Paging auf offset/limit abgebildet
-  # werden. Eine flache Liste wuerde das nicht pruefen.
+  # These quirks are exactly what integrations hinge on in real projects:
+  # rootPath must point to data, paging must be mapped to offset/limit.
+  # A flat list would not exercise that.
   #
-  # Die Bestandskonten stammen aus derselben HR-CSV wie die anderen
-  # Zielsysteme, die employeeId ist also ueberall derselbe
-  # Korrelationsschluessel.
+  # Seed accounts come from the same HR CSV as the other target systems,
+  # so employeeId is the same correlation key everywhere.
   # -------------------------------------------------------------------------
   mockapi:
     build:
@@ -266,9 +285,14 @@ services:
       dockerfile: docker/mockapi/Dockerfile
     image: iiq-mockapi:${IIQ_VERSION:-8.5}
     container_name: iiq-mockapi
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
+    # Own image, uid 1000, binds >1024, needs no capability at all.
+    cap_drop: [ALL]
     environment:
       API_TOKEN: ${MOCKAPI_TOKEN:-mocktoken}
-      # Basic Auth als Alternative - der Connector beherrscht beides.
+      # Basic Auth as alternative - the connector supports both.
       BASIC_USER: ${MOCKAPI_USER:-iiq}
       BASIC_PASSWORD: ${MOCKAPI_PASSWORD:-iiqpassword}
       SEED_COUNT: "4"
@@ -280,31 +304,33 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # SCIM-Server - drittes Zielsystem
+  # SCIM server - third target system
   #
-  # Zur Werkzeugwahl:
-  #   - harrykodden/scim: Python-Implementierung nach RFC 7643/7644,
-  #     amd64 steht im Manifest an erster Stelle. Getestet: liefert
-  #     ServiceProviderConfig, unterstuetzt patch und filter, und nimmt
-  #     angelegte User mit id/meta/etag entgegen - taugt also als echtes
-  #     Zielsystem, nicht nur zum Lesen.
-  #   - i2scim (Quarkus) und Apache SCIMple waeren Alternativen; ersteres
-  #     ist schwergewichtiger, letzteres war nicht erreichbar.
+  # Tool choice:
+  #   - harrykodden/scim: Python implementation of RFC 7643/7644, amd64
+  #     first in the manifest. Tested: serves ServiceProviderConfig,
+  #     supports patch and filter, and accepts created users with
+  #     id/meta/etag - usable as a real target system, not read-only.
+  #   - i2scim (Quarkus) and Apache SCIMple would be alternatives; the
+  #     former is heavier, the latter was unreachable.
   #
-  # Die Daten liegen im Container (Flat-File-Backend). Fuer eine
-  # Dev-Umgebung genuegt das; ein Neustart des Containers setzt sie
-  # zurueck, was beim Testen eher nuetzlich als hinderlich ist.
+  # Data lives in the container (flat-file backend). Sufficient for dev;
+  # a container restart resets it, which is more useful than harmful
+  # when testing.
   #
-  # Anmeldung ueber Bearer-Token (API_KEY), passend zum authType des
-  # SCIM-2.0-Connectors.
+  # Auth via bearer token (API_KEY), matching the SCIM 2.0 connector's
+  # authType.
   # -------------------------------------------------------------------------
   scim:
-    # Auf den Digest gepinnt: Das Image bietet keine Versions-Tags,
-    # und "latest" wuerde sich bei einem Upstream-Push still
-    # aendern - alle anderen Images hier sind ebenfalls gepinnt.
+    # Pinned to the digest: the image has no version tags, and "latest"
+    # would change silently on an upstream push - every other image here
+    # is pinned as well.
     image: harrykodden/scim@sha256:e75540ee0ddd4908c572bd9149331d077d472b3cd91f1773806f2b38fd788a10
     platform: linux/amd64
     container_name: iiq-scim
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
     environment:
       API_KEY: ${SCIM_API_KEY:-secret}
       LOGLEVEL: INFO
@@ -320,33 +346,37 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # LDAP-UI - Browser fuer das Testverzeichnis
+  # LDAP UI - browser for the test directory
   #
-  # Zur Werkzeugwahl:
-  #   - phpLDAPadmin (in drei der vier Referenzprojekte) ist optisch und
-  #     technisch veraltet; das osixia-Image wird seit Jahren nicht mehr
-  #     gepflegt.
-  #   - LLDAP waere kein Browser, sondern ein eigener LDAP-Server mit
-  #     Weboberflaeche - er wuerde OpenLDAP ersetzen statt ergaenzen.
-  #   - dnknth/ldap-ui: schlanke Vue-Oberflaeche auf Alpine-Basis, zeigt
-  #     den echten Verzeichnisbaum, kann Eintraege anlegen, aendern und
-  #     loeschen, beherrscht LDAP-Suchfilter und Schema-Ansicht.
+  # Tool choice:
+  #   - phpLDAPadmin (in three of the four reference projects) is dated
+  #     visually and technically; the osixia image has been unmaintained
+  #     for years.
+  #   - LLDAP is not a browser but a standalone LDAP server with a web
+  #     UI - it would replace OpenLDAP rather than complement it.
+  #   - dnknth/ldap-ui: lean Vue UI on Alpine, shows the real directory
+  #     tree, can create/modify/delete entries, supports LDAP search
+  #     filters and a schema view.
   #
-  # Angemeldet wird sich mit dem Admin-DN des Verzeichnisses:
+  # Log in with the directory's admin DN:
   #     cn=admin,dc=example,dc=com  /  adminpassword
   # -------------------------------------------------------------------------
   ldap-ui:
-    image: dnknth/ldap-ui:0.15.4
+    # Pinned by digest: personal namespace with a mutable tag. Was 0.15.4.
+    image: dnknth/ldap-ui@sha256:186d758f7698892c6ef2642af6ed0f134fa611ed371e4d804e4816b700888059
     platform: linux/amd64
     container_name: iiq-ldap-ui
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
     environment:
       LDAP_URL: ldap://openldap:1389
       BASE_DN: ${LDAP_ROOT:-dc=example,dc=com}
-      # Bindet den Anmeldenamen an den Admin-DN. Ohne das muesste man den
-      # vollstaendigen DN jedes Mal eintippen.
+      # Binds the login name to the admin DN. Without it the full DN
+      # would have to be typed every time.
       BIND_PATTERN: cn=%s,${LDAP_ROOT:-dc=example,dc=com}
       LOGIN_ATTR: cn
-      # Passwoerter werden beim Anlegen/Aendern mit SSHA gehasht.
+      # Passwords are hashed with SSHA on create/modify.
       PASSWD_HASH: SSHA
     ports:
       - "127.0.0.1:${LDAP_UI_PORT:-5080}:5000"
@@ -357,26 +387,27 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # DBGate - Datenbank-Oberflaeche
+  # DBGate - database UI
   #
-  # Zur Werkzeugwahl:
-  #   - pgAdmin schied aus: dessen Image liefert auf diesem Host die
-  #     arm64-Variante ("exec format error"), auch mit erzwungener
-  #     platform-Angabe und ueber mehrere Tags hinweg.
-  #   - Adminer lief technisch einwandfrei, ist optisch aber sehr
-  #     altbacken.
-  #   - DBGate: modernes Interface, SQL-Editor mit Autovervollstaendigung,
-  #     Tabellen-Editor, Daten-Export. Die Verbindungen werden ueber
-  #     CONNECTIONS vorkonfiguriert, es ist also kein manuelles Anlegen
-  #     noetig.
+  # Tool choice:
+  #   - pgAdmin was ruled out: on this host its image resolves to the
+  #     arm64 variant ("exec format error"), even with a forced platform
+  #     and across several tags.
+  #   - Adminer worked flawlessly but looks very dated.
+  #   - DBGate: modern UI, SQL editor with autocomplete, table editor,
+  #     data export. Connections are preconfigured via CONNECTIONS, so
+  #     nothing has to be created manually.
   #
-  # Die Datenbanken werden bewusst einzeln eingetragen, damit alle drei
-  # in der Seitenleiste erscheinen.
+  # The databases are listed individually on purpose so all three show
+  # up in the sidebar.
   # -------------------------------------------------------------------------
   dbgate:
     image: dbgate/dbgate:7.3.0
     platform: linux/amd64
     container_name: iiq-dbgate
+    # Cheap hardening, safe everywhere: no setuid escalation inside
+    # the container.
+    security_opt: ["no-new-privileges:true"]
     environment:
       CONNECTIONS: iiq,plugin,ah,target
 
@@ -404,11 +435,10 @@ services:
       DATABASE_ah: identityiqah
       ENGINE_ah: postgres@dbgate-plugin-postgres
 
-      # Die Zieldatenbank des JDBC-Connectors. Hier laesst sich
-      # nachvollziehen, was IIQ beim Provisionieren tatsaechlich
-      # schreibt - Tabellen IIQData und IIQAccountRoles im Schema
-      # targetapp.
-      LABEL_target: JDBC-Zielsystem
+      # Target database of the JDBC connector. Shows what IIQ actually
+      # writes when provisioning - tables IIQData and IIQAccountRoles
+      # in schema targetapp.
+      LABEL_target: JDBC Target System
       SERVER_target: postgres
       PORT_target: "5432"
       USER_target: targetapp

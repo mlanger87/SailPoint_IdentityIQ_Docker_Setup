@@ -2,53 +2,58 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  Rollenmodell
+  Role model
   ===========================================================================
-  Aufgebaut nach dem ueblichen zweistufigen Muster:
+  Built on the usual two-tier pattern:
 
-    Business-Rolle (business)      - beschreibt eine Funktion im
-                                     Unternehmen, wird automatisch
-                                     zugewiesen
-        erfordert
-    IT-Rolle (it)                  - buendelt konkrete Berechtigungen
-                                     eines Zielsystems
+    Business role (business)    describes a function in the company,
+                                assigned automatically
+        requires
+    IT role (it)                bundles concrete entitlements of one
+                                target system
 
-  Warum zweistufig und nicht Entitlements direkt an der Business-Rolle:
-  Die Business-Rolle bleibt so unabhaengig vom Zielsystem. Kommt spaeter
-  ein zweites System hinzu, wird eine weitere IT-Rolle ergaenzt, ohne
-  dass die fachliche Beschreibung angefasst werden muss.
+  Why two tiers instead of entitlements directly on the business role:
+  the business role stays independent of the target system. When a
+  second system is added later, another IT role is added without touching
+  the business definition.
 
-  Die Zuweisung erfolgt ueber "selector" - ein Filter auf Attribute der
-  Identitaet, die aus der HR-CSV stammen. Der Task "Refresh Identity
-  Cube" wertet diese Regeln aus.
+  Assignment runs via "selector", a filter on identity attributes that
+  originate from the HR CSV. The task "Refresh Identity Cube" evaluates
+  these rules.
 
-  WICHTIG: Jeder MatchTerm braucht type="IdentityAttribute". Ohne die
-  Angabe wertet IIQ ihn als Entitlement aus - der Selector greift dann
-  nie, ohne jede Fehlermeldung.
+  IMPORTANT: every MatchTerm needs type="IdentityAttribute". Without it
+  IIQ evaluates the term as an entitlement; the selector then never
+  matches, without any error message.
 
-  EBENSO WICHTIG: Der Rollentyp muss "business" sein, nicht
-  "organization". Letzteres bildet auf den Typ "organizational" ab,
-  und der traegt laut ObjectConfig:Bundle die Merkmale
-  noAssignmentSelector="true" und noAutoAssignment="true" - er kann
-  also gar keinen Selector haben und wird nie automatisch zugewiesen.
-  Der Import schluckt den Typ trotzdem klaglos.
+  EQUALLY IMPORTANT: a MatchExpression without and="true" ORs its terms.
+  "department=IT" plus "hrStatus=active" without the flag matched 90
+  identities (everyone active) instead of the 18 IT people. Nested
+  conditions use a MatchTerm with container="true" and child MatchTerms;
+  and="false" on the container makes those children an OR group.
 
-  Die zuweisbaren Typen zeigt:
+  EQUALLY IMPORTANT: the role type must be "business", not
+  "organization". The latter maps to the type "organizational", which
+  according to ObjectConfig:Bundle carries noAssignmentSelector="true"
+  and noAutoAssignment="true": it cannot have a selector at all and is
+  never assigned automatically. The import accepts the type without
+  complaint nonetheless.
+
+  The assignable types are shown by:
       get ObjectConfig Bundle
 
-  Ein Hinweis zur Wirkung: Mit provision=true im Refresh-Task legt IIQ
-  den LDAP-Account an, sobald eine Rolle zugewiesen wird und der
-  Mitarbeitende noch keinen Account hat. Genau das ist der Joiner-Fall.
+  A note on effect: with provision=true in the refresh task IIQ creates
+  the LDAP account as soon as a role is assigned and the employee has no
+  account yet. That is exactly the joiner case.
   ===========================================================================
 -->
 <sailpoint>
 
   <!-- ===================================================================
-       IT-Rollen - buendeln die LDAP-Gruppen
+       IT roles: bundle the LDAP groups
        =================================================================== -->
 
   <Bundle displayName="LDAP Basic Access" name="ldap-basic-access" type="it">
-    <Description>Grundberechtigungen, die jede Person im Unternehmen erhaelt.</Description>
+    <Description>Basic entitlements every person in the company receives.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
@@ -74,7 +79,7 @@
   </Bundle>
 
   <Bundle displayName="LDAP IT Access" name="ldap-it-access" type="it">
-    <Description>Zusaetzliche Berechtigungen fuer die IT-Abteilung.</Description>
+    <Description>Additional entitlements for the IT department.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
@@ -100,7 +105,7 @@
   </Bundle>
 
   <Bundle displayName="LDAP Sales Access" name="ldap-sales-access" type="it">
-    <Description>Zusaetzliche Berechtigungen fuer den Vertrieb.</Description>
+    <Description>Additional entitlements for Sales.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
@@ -126,7 +131,7 @@
   </Bundle>
 
   <Bundle displayName="LDAP Manager Access" name="ldap-manager-access" type="it">
-    <Description>Berechtigungen fuer Fuehrungskraefte.</Description>
+    <Description>Entitlements for managers.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
@@ -151,19 +156,18 @@
   </Bundle>
 
   <!-- ===================================================================
-       Business-Rollen - werden automatisch zugewiesen
+       Business roles: assigned automatically
        =================================================================== -->
 
   <Bundle displayName="Employee" name="employee" type="business">
-    <Description>Jede aktive Person im Unternehmen. Traegt die Grundberechtigungen.</Description>
+    <Description>Every active person in the company. Carries the basic entitlements.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
     <!--
-      Zuweisungsregel: alle mit HR-Status "active". Das Attribut stammt
-      aus der CSV-Spalte status und ist in 23-ObjectConfig-Identity.xml
-      als searchable definiert - sonst wuerde dieser Filter nicht
-      funktionieren.
+      Assignment rule: everyone with HR status "active". The attribute
+      comes from the CSV column status and is defined as searchable in
+      23-ObjectConfig-Identity.xml; otherwise this filter would not work.
     -->
     <Selector>
       <IdentitySelector>
@@ -178,13 +182,17 @@
   </Bundle>
 
   <Bundle displayName="IT Staff" name="it-staff" type="business">
-    <Description>Mitarbeitende der IT-Abteilung.</Description>
+    <Description>Members of the IT department.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
+    <!--
+      and="true" is mandatory here: without it the two terms are ORed
+      and every active identity became IT staff (90 instead of 18).
+    -->
     <Selector>
       <IdentitySelector>
-        <MatchExpression>
+        <MatchExpression and="true">
           <MatchTerm name="department" value="IT" type="IdentityAttribute"/>
           <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
         </MatchExpression>
@@ -196,13 +204,13 @@
   </Bundle>
 
   <Bundle displayName="Sales Staff" name="sales-staff" type="business">
-    <Description>Mitarbeitende im Vertrieb.</Description>
+    <Description>Members of the Sales department.</Description>
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
     <Selector>
       <IdentitySelector>
-        <MatchExpression>
+        <MatchExpression and="true">
           <MatchTerm name="department" value="Sales" type="IdentityAttribute"/>
           <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
         </MatchExpression>
@@ -210,6 +218,33 @@
     </Selector>
     <Requirements>
       <Reference class="sailpoint.object.Bundle" name="ldap-sales-access"/>
+    </Requirements>
+  </Bundle>
+
+  <!--
+    Managers: active AND (department-head OR team-lead). The OR is a
+    container term with and="false"; the outer expression ANDs it with
+    the status term. Without this role ldap-manager-access was required
+    by nothing and never assigned.
+  -->
+  <Bundle displayName="Manager" name="manager" type="business">
+    <Description>Department heads and team leads. Carries the manager entitlements.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression and="true">
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
+          <MatchTerm container="true" and="false" type="IdentityAttribute">
+            <MatchTerm name="employeeType" value="department-head" type="IdentityAttribute"/>
+            <MatchTerm name="employeeType" value="team-lead" type="IdentityAttribute"/>
+          </MatchTerm>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="ldap-manager-access"/>
     </Requirements>
   </Bundle>
 

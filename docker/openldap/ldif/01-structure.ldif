@@ -1,14 +1,10 @@
 # ===========================================================================
-# Grundstruktur des Testverzeichnisses
+# Base structure of the test directory
 # ---------------------------------------------------------------------------
-# Basis-DN: dc=example,dc=com
+# Base DN: dc=example,dc=com
 #
-# Wird beim ersten Start von bitnami/openldap eingelesen
-# (LDAP_CUSTOM_LDIF_DIR=/ldifs). Die Dateien werden alphabetisch
-# verarbeitet, daher die Nummernpraefixe.
-#
-# Die Daten selbst sind englisch gehalten, wie in realen
-# IdentityIQ-Projekten ueblich.
+# Loaded on first start of bitnami/openldap (LDAP_CUSTOM_LDIF_DIR=/ldifs).
+# Files are processed alphabetically, hence the numeric prefixes.
 # ===========================================================================
 
 dn: dc=example,dc=com
@@ -27,19 +23,19 @@ objectClass: organizationalUnit
 ou: groups
 
 # ---------------------------------------------------------------------------
-# Platzhalter fuer leere Gruppen
+# Placeholder for empty groups
 #
-# Die objectClass groupOfNames verlangt laut RFC 4519 mindestens ein
-# member; eine mitgliederlose Gruppe ist schema-widrig und wird von slapd
-# abgelehnt. Da dieses Verzeichnis Zielsystem ist, sind aber viele Gruppen
-# zunaechst leer und warten darauf, dass IdentityIQ Accounts hineinlegt.
+# objectClass groupOfNames requires at least one member per RFC 4519; a
+# memberless group violates the schema and slapd rejects it. Since this
+# directory is a target system, many groups start out empty, waiting for
+# IdentityIQ to put accounts in.
 #
-# Dieser Eintrag dient solchen Gruppen als einziges member. Er liegt
-# bewusst NICHT unter ou=people, damit er nicht in den Bereich der
-# Account-Aggregation faellt (searchDN: ou=people).
+# This entry serves as the sole member of such groups. It is deliberately
+# NOT under ou=people so it stays out of account aggregation scope
+# (searchDN: ou=people).
 # ---------------------------------------------------------------------------
 dn: cn=placeholder,dc=example,dc=com
 objectClass: applicationProcess
 objectClass: top
 cn: placeholder
-description: Platzhalter fuer leere Gruppen - kein echter Account
+description: Placeholder for empty groups - not a real account

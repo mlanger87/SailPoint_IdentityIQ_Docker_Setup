@@ -2,36 +2,42 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  SCIM-Applikation - drittes Zielsystem
+  SCIM application: third target system
   ===========================================================================
-  Spricht den Container "scim" an (harrykodden/scim, RFC 7643/7644).
+  Talks to the container "scim" (harrykodden/scim, RFC 7643/7644).
 
-  Der Connector kommt aus connector-bundle-webservices.jar und wird
-  ueber den OpenConnectorAdapter geladen. Eine Besonderheit dabei:
+  The connector comes from connector-bundle-webservices.jar and is loaded
+  through the OpenConnectorAdapter. One peculiarity:
 
       Class.forName("openconnector.connector.scim2.SCIM2Connector")
 
-  schlaegt mit ClassNotFoundException fehl, obwohl die Klasse im Bundle
-  liegt. Der Adapter benutzt einen eigenen Klassenlader; ein Test ueber
-  den normalen Klassenpfad geht daran vorbei und beweist nichts. Die
-  einzige belastbare Pruefung ist ein echter Verbindungstest.
+  fails with ClassNotFoundException although the class is in the bundle.
+  The adapter uses its own class loader; a test via the normal classpath
+  bypasses it and proves nothing. The only reliable check is a real
+  connection test.
 
-  Die Struktur folgt einem Export aus einer 8.5-Instanz. Abweichungen:
+  The structure follows an export from an 8.5 instance. Deviations:
 
-    - host zeigt auf den Container im Docker-Netz (http://scim:8000)
-      statt auf einen Platzhalter.
-    - Zugangsdaten im Klartext statt verschluesselt (1:ACP:...). Der
-      verschluesselte Wert waere an den Keystore der Ursprungsinstanz
-      gebunden und hier wertlos - siehe CLAUDE.md.
-    - Das Account-Schema ist ausgefuellt. Der Export trug ein leeres
-      Schema (nur nativeObjectType="User"), weil die Attribute dort
-      ueber DISCOVER_SCHEMA vom Server geholt werden sollten.
+    - host points to the container on the Docker network
+      (http://scim:8000) instead of a placeholder.
+    - Credentials in clear text instead of encrypted (1:ACP:...). The
+      encrypted value would be bound to the keystore of the source
+      instance and worthless here; see CLAUDE.md.
+    - The account schema is filled in. The export carried an empty
+      schema (only nativeObjectType="User") because the attributes were
+      meant to be fetched from the server via DISCOVER_SCHEMA.
 
-  Der Server nutzt Bearer-Token-Authentifizierung: authType="oauthBearer".
-  Das "basic" aus dem Export passt dazu nicht.
+  The server uses bearer token authentication: authType="oauthBearer".
+  The "basic" from the export does not match it.
   ===========================================================================
 -->
 <sailpoint>
+
+  <CorrelationConfig name="SCIM Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="externalId"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
 
   <Application connector="sailpoint.connector.OpenConnectorAdapter"
                featuresString="DISCOVER_SCHEMA, PROVISIONING, SYNC_PROVISIONING, ENABLE, SEARCH, ACCOUNT_ONLY_REQUEST"
@@ -52,15 +58,14 @@
         <entry key="host" value="http://scim:8000"/>
 
         <!--
-          Der Server erwartet "Authorization: Bearer <token>".
+          The server expects "Authorization: Bearer <token>".
 
-          Der richtige Wert ist "oauthBearer" - ein statischer Token.
-          Nicht "oauth2": das entspricht der Konstante OAuth2Login und
-          erwartet einen vollstaendigen Token-Fluss mit token_url,
-          Benutzer und Passwort. Mit dem falschen Wert antwortet der
-          Server mit 401 invalidCredentials.
+          The correct value is "oauthBearer", a static token. Not
+          "oauth2": that corresponds to the constant OAuth2Login and
+          expects a full token flow with token_url, user and password.
+          With the wrong value the server answers 401 invalidCredentials.
 
-          Die gueltigen Werte stehen in den Konstanten des Bundles:
+          The valid values are in the bundle's constants:
             javap -p -constants openconnector/connector/scim2/SCIM2Constants.class
               AUTH_TYPE_BASIC              = "Basic"
               AUTH_TYPE_BEARER             = "oauthBearer"
@@ -82,11 +87,11 @@
         </entry>
 
         <!--
-          Fordert genau die Attribute des Schemas an (?attributes=...).
-          Ohne diesen Schalter holt der Connector einen Standardsatz, in
-          dem externalId FEHLT - die Korrelation greift dann nicht, und
-          IIQ legt fuer jedes Konto eine eigene Identitaet an, statt es
-          der vorhandenen zuzuordnen.
+          Requests exactly the schema's attributes (?attributes=...).
+          Without this switch the connector fetches a default set in
+          which externalId is MISSING; correlation then does not match,
+          and IIQ creates a separate identity for every account instead
+          of assigning it to the existing one.
         -->
         <entry key="explicitAttributesRequest">
           <value>
@@ -98,7 +103,11 @@
             <Boolean>true</Boolean>
           </value>
         </entry>
-        <entry key="skipGrpUpdate" value="true"/>
+        <entry key="skipGrpUpdate">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
 
         <entry key="encrypted"
                value="client_secret,oauthBearerToken,oauthTokenInfo,refresh_token,private_key,private_key_password,additional_payload,oauth2password"/>
@@ -120,12 +129,12 @@
 
     <Schemas>
       <!--
-        externalId traegt die Personalnummer und ist damit der
-        Korrelationsschluessel - id ist eine vom Server vergebene UUID
-        und taugt dafuer nicht, weil sie beim Anlegen noch unbekannt ist.
+        externalId carries the employee number and is therefore the
+        correlation key; id is a server-assigned UUID and unsuitable
+        because it is still unknown at create time.
 
-        identityAttribute bleibt trotzdem id: das ist die native
-        Kennung, ueber die der Connector einen Eintrag adressiert.
+        identityAttribute nevertheless stays id: that is the native
+        identifier the connector uses to address an entry.
       -->
       <Schema displayAttribute="userName"
               identityAttribute="id"
@@ -133,36 +142,36 @@
               nativeObjectType="User"
               objectType="account">
         <AttributeDefinition name="id" type="string">
-          <Description>Vom Server vergebene Kennung (UUID)</Description>
+          <Description>Server-assigned identifier (UUID)</Description>
         </AttributeDefinition>
         <AttributeDefinition name="externalId" type="string">
-          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+          <Description>Employee number, the correlation key</Description>
         </AttributeDefinition>
         <AttributeDefinition name="userName" type="string">
-          <Description>Anmeldename</Description>
+          <Description>Login name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="displayName" type="string">
-          <Description>Anzeigename</Description>
+          <Description>Display name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="name.givenName" type="string">
-          <Description>Vorname</Description>
+          <Description>First name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="name.familyName" type="string">
-          <Description>Nachname</Description>
+          <Description>Last name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="emails.value" type="string">
-          <Description>Mailadresse</Description>
+          <Description>E-mail address</Description>
         </AttributeDefinition>
         <AttributeDefinition name="title" type="string">
-          <Description>Funktionsbezeichnung</Description>
+          <Description>Job title</Description>
         </AttributeDefinition>
         <AttributeDefinition name="active" type="boolean">
-          <Description>Aktiv oder deaktiviert</Description>
+          <Description>Active or disabled</Description>
         </AttributeDefinition>
         <AttributeDefinition entitlement="true" managed="true" multi="true"
                              name="groups.value" schemaObjectType="group"
                              type="string">
-          <Description>Gruppenmitgliedschaften</Description>
+          <Description>Group memberships</Description>
         </AttributeDefinition>
       </Schema>
 
@@ -172,32 +181,38 @@
               nativeObjectType="Group"
               objectType="group">
         <AttributeDefinition name="id" type="string">
-          <Description>Kennung der Gruppe</Description>
+          <Description>Group identifier</Description>
         </AttributeDefinition>
         <AttributeDefinition name="displayName" type="string">
-          <Description>Name der Gruppe</Description>
+          <Description>Group name</Description>
         </AttributeDefinition>
       </Schema>
     </Schemas>
 
   </Application>
 
-  <CorrelationConfig name="SCIM Correlation">
-    <AttributeAssignments>
-      <Filter operation="EQ" property="employeeNumber" value="externalId"/>
-    </AttributeAssignments>
-  </CorrelationConfig>
-
   <TaskDefinition name="SCIM Aggregation"
                   executor="sailpoint.task.ResourceIdentityScan"
                   progressMode="Percentage"
                   resultAction="Delete"
-                  template="true"
                   type="AccountAggregation">
-    <Description>Liest die Konten des SCIM-Zielsystems und korreliert sie ueber externalId.</Description>
+    <Description>Reads the accounts of the SCIM target system and correlates them via externalId.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="SCIM-Target"/>
+        <!--
+          A target keeps accounts that were deleted natively unless this is
+          set; the stock template leaves it false. Measured: 85 entries removed
+          from the directory, aggregation "Success", 90 links still there.
+        -->
+        <entry key="checkDeleted">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
         <entry key="correlateEntitlements">
           <value>
             <Boolean>true</Boolean>

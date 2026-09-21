@@ -1,24 +1,23 @@
 #!/bin/bash
 # ===========================================================================
-# Entrypoint fuer den IdentityIQ-Container.
+# Entrypoint for the IdentityIQ container.
 #
-# Zwei Betriebsarten, gesteuert ueber die Umgebungsvariable INIT:
+# Two modes, selected via the INIT environment variable:
 #
-#   INIT=y   Init-Container. Wartet auf die Datenbank, importiert die
-#            Basiskonfiguration (falls noetig), spielt Patch, eigene
-#            Objekte und Plugins ein - und beendet sich mit Code 0.
+#   INIT=y   Init container. Waits for the database, imports the base
+#            configuration (if needed), applies patch, custom objects and
+#            plugins - then exits with code 0.
 #
-#   sonst    Anwendungsserver. Startet nur Tomcat.
+#   else     Application server. Starts Tomcat only.
 #
-# Warum diese Trennung (Muster aus Referenzprojekt C):
-# Der Import darf genau einmal laufen. Mit einem separaten Init-Container
-# und "depends_on: condition: service_completed_successfully" ist das
-# sauber modelliert - auch dann noch, wenn spaeter mehrere IIQ-Knoten
-# parallel laufen sollen.
+# Why the split (pattern from reference project C):
+# The import must run exactly once. A separate init container plus
+# "depends_on: condition: service_completed_successfully" models that
+# cleanly - and stays correct if several IIQ nodes run in parallel later.
 #
-# Die Idempotenz haengt NICHT an einer Markerdatei (so macht es
-# Referenzprojekt A, was bei Volume-Wechseln und Rebuilds bricht),
-# sondern wird direkt in der Datenbank geprueft.
+# Idempotency does NOT hinge on a marker file (reference project A does
+# that, which breaks on volume swaps and rebuilds) but is checked directly
+# in the database.
 # ===========================================================================
 set -euo pipefail
 
@@ -32,49 +31,48 @@ DB_WAIT_TIMEOUT="${DB_WAIT_TIMEOUT:-180}"
 log() { echo "[iiq-entrypoint] $*"; }
 
 # ---------------------------------------------------------------------------
-# Auf die Datenbank warten
+# Wait for the database
 # ---------------------------------------------------------------------------
 wait_for_db() {
-    log "Warte auf PostgreSQL unter ${DB_HOST}:${DB_PORT} (max. ${DB_WAIT_TIMEOUT}s)"
+    log "Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT} (max ${DB_WAIT_TIMEOUT}s)"
     local waited=0
     until pg_isready -h "${DB_HOST}" -p "${DB_PORT}" -q; do
         if [ "${waited}" -ge "${DB_WAIT_TIMEOUT}" ]; then
-            log "FEHLER: Datenbank nach ${DB_WAIT_TIMEOUT}s nicht erreichbar."
+            log "ERROR: database not reachable after ${DB_WAIT_TIMEOUT}s."
             return 1
         fi
         sleep 2
         waited=$((waited + 2))
     done
-    log "Datenbank ist erreichbar (nach ${waited}s)."
+    log "Database reachable (after ${waited}s)."
 }
 
 # ---------------------------------------------------------------------------
-# Mehrere Konsolenbefehle in EINEM JVM-Start ausfuehren.
+# Run several console commands in ONE JVM start.
 #
-# Jeder "iiq console"-Aufruf kostet 10-20s Hibernate-Startup.
-# Referenzprojekt A startet 8 JVMs nacheinander - das dauert unnoetig.
+# Every "iiq console" invocation costs 10-20s of Hibernate startup.
+# Reference project A starts 8 JVMs in sequence - needlessly slow.
 #
-# WICHTIG: Am Ende MUSS "quit" stehen. Die Konsole beendet sich bei
-# einem reinen EOF auf stdin nicht, sondern wartet weiter auf Eingaben -
-# der Container haengt dann unbegrenzt. (Genau das ist hier beim ersten
-# Testlauf passiert: 10 Minuten Leerlauf bei 43 % CPU.)
+# IMPORTANT: "quit" MUST come last. The console does not exit on a bare
+# EOF on stdin; it keeps waiting for input and the container hangs
+# indefinitely. (Exactly that happened on the first test run here:
+# 10 minutes idle at 43 % CPU.)
 #
-# Die Eingabe kommt ueber stdin; "quit" wird automatisch angehaengt.
+# Input comes via stdin; "quit" is appended automatically.
 iiq_console() {
     { cat; printf '\nquit\n'; } | "${IIQ_BIN}" console
 }
 
 # ---------------------------------------------------------------------------
-# Wie iiq_console, aber mit Fehlererkennung.
+# Like iiq_console, but with error detection.
 #
-# Hintergrund: "iiq console" liefert AUCH bei einem fehlgeschlagenen
-# Kommando den Exitcode 0. Ein misslungener Import wuerde sonst
-# unbemerkt durchlaufen und der Server startete gegen eine
-# halb-initialisierte Datenbank.
+# Background: "iiq console" returns exit code 0 EVEN for a failed
+# command. A botched import would otherwise pass unnoticed and the server
+# would start against a half-initialized database.
 #
-# Deshalb wird die Ausgabe eingesammelt und auf Fehlersignaturen
-# geprueft. Referenzprojekt B hat hier kein "set -e" und keine
-# Auswertung - Fehler fallen dort erst spaeter auf.
+# So the output is captured and scanned for error signatures. Reference
+# project B has neither "set -e" nor any check here - errors surface only
+# later.
 # ---------------------------------------------------------------------------
 iiq_console_checked() {
     local label="$1"
@@ -84,40 +82,39 @@ iiq_console_checked() {
 
     echo "${out}"
 
-    # Die Muster sind bewusst eng gefasst.
+    # The patterns are deliberately narrow.
     #
-    # Ein zu breites Muster ist hier gefaehrlich: Bei einem Treffer
-    # liefert diese Funktion 1, der Init-Container endet wegen "set -e"
-    # mit Fehler, und "iiq" startet wegen
-    # "condition: service_completed_successfully" gar nicht erst. Ein
-    # False Positive blockiert also den gesamten Stack.
+    # A pattern that is too broad is dangerous here: on a match this
+    # function returns 1, the init container exits with an error because
+    # of "set -e", and "iiq" never starts because of
+    # "condition: service_completed_successfully". A false positive
+    # therefore blocks the entire stack.
     #
-    # Deshalb NICHT auf blosses "Exception" oder "Unable to" pruefen:
-    # Beides kommt in harmlosen Meldungen vor (etwa "Unable to find
-    # localized message for key ..."). Stattdessen auf Muster, die einen
-    # echten Abbruch anzeigen:
+    # So do NOT match bare "Exception" or "Unable to": both occur in
+    # harmless messages (e.g. "Unable to find localized message for
+    # key ..."). Instead match patterns that indicate a real abort:
     #
-    #   ^Error:              Fehlermeldung der Konsole am Zeilenanfang
-    #   ^Caused by:          Ursachenkette einer Ausnahme
-    #   ^\s*at sailpoint\.   Stacktrace-Zeile aus IIQ-Code
-    #   java...Exception     voll qualifizierter Ausnahmename
+    #   ^Error:              console error message at line start
+    #   ^Caused by:          exception cause chain
+    #   ^\s*at sailpoint\.   stack-trace line from IIQ code
+    #   java...Exception     fully qualified exception name
     if echo "${out}" | grep -qE '^Error:|^Caused by:|^[[:space:]]*at sailpoint\.|(java|javax|org|sailpoint|bsh)\.[A-Za-z.]*(Exception|Error)'; then
-        log "FEHLER bei: ${label}"
-        log "Die Ausgabe enthaelt eine Fehlermeldung (siehe oben)."
+        log "ERROR in: ${label}"
+        log "Output contains an error message (see above)."
         return 1
     fi
     return "${rc}"
 }
 
 # ---------------------------------------------------------------------------
-# Einen Ordner voller XML-Dateien in einem Rutsch importieren.
+# Import a folder of XML files in one go.
 #
-# Statt N Konsolenaufrufe wird ein Sammel-XML mit <ImportAction
-# name='include'> erzeugt und einmal importiert. Das "sort" sorgt fuer
-# eine deterministische Reihenfolge - Dateinamen koennen die
-# Import-Reihenfolge also ueber ein Praefix steuern (z.B. 10-, 20-).
+# Instead of N console calls, a wrapper XML with <ImportAction
+# name='include'> is generated and imported once. "sort" gives a
+# deterministic order - file names control import order via a prefix
+# (e.g. 10-, 20-).
 #
-# Idee uebernommen aus Referenzprojekt B (import_folder).
+# Idea taken from reference project B (import_folder).
 # ---------------------------------------------------------------------------
 import_folder() {
     local folder="$1"
@@ -130,62 +127,66 @@ import_folder() {
     local count
     count=$(find "${folder}" -name '*.xml' -type f 2>/dev/null | wc -l)
     if [ "${count}" -eq 0 ]; then
-        log "Keine XML-Dateien in ${folder} - uebersprungen."
+        log "No XML files in ${folder} - skipped."
         return 0
     fi
 
-    log "Importiere ${count} XML-Datei(en) aus ${folder}:"
-    find "${folder}" -name '*.xml' -type f | sort | sed 's|^|    |'
+    log "Importing ${count} XML file(s) from ${folder}:"
+    find "${folder}" -name '*.xml' -type f | LC_ALL=C sort | sed 's|^|    |'
 
     {
         echo '<?xml version="1.0" encoding="UTF-8"?>'
         echo '<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">'
         echo '<sailpoint>'
-        find "${folder}" -name '*.xml' -type f | sort | while read -r f; do
+        find "${folder}" -name '*.xml' -type f | LC_ALL=C sort | while read -r f; do
+            # The path lands in an XML attribute: escape & and ' or a
+            # file name containing them breaks the manifest. sed, not
+            # ${f//x/y}: bash 5.2 treats & in the replacement as "the match".
+            f="$(printf '%s' "${f}" | sed "s/&/\\&amp;/g; s/'/\\&apos;/g")"
             echo "  <ImportAction name='include' value='${f}'/>"
         done
         echo '</sailpoint>'
     } > "${manifest}"
 
-    echo "import ${manifest}" | iiq_console_checked "Import aus ${folder}"
-    log "Import aus ${folder} abgeschlossen."
+    echo "import ${manifest}" | iiq_console_checked "Import from ${folder}"
+    log "Import from ${folder} complete."
 }
 
 # ---------------------------------------------------------------------------
-# Ist IdentityIQ bereits initialisiert?
+# Is IdentityIQ already initialized?
 #
-# Geprueft wird ein Objekt, das erst durch "import init.xml" entsteht.
-# Diese Pruefung liest den Zustand dort, wo er tatsaechlich lebt: in der
-# Datenbank. Sie ueberlebt damit Image-Rebuilds und Container-Neustarts.
+# Checks for an object that only exists after "import init.xml". This
+# reads the state where it actually lives: in the database. It therefore
+# survives image rebuilds and container restarts.
 # ---------------------------------------------------------------------------
 is_initialized() {
     local out
-    # Nur EIN JVM-Start: Ausgabe einmal einsammeln und dann auswerten.
-    # Bewusst ohne iiq_console_checked - "Unknown object" ist hier ein
-    # gueltiges Ergebnis und kein Fehler.
+    # Only ONE JVM start: capture the output once, then evaluate.
+    # Deliberately not iiq_console_checked - "Unknown object" is a valid
+    # result here, not an error.
     out="$(echo "get Identity spadmin" | iiq_console 2>&1 || true)"
 
-    # Vor dem Import von init.xml meldet die Konsole "Unknown object".
+    # Before init.xml is imported the console reports "Unknown object".
     if echo "${out}" | grep -q "Unknown object"; then
-        log "Zustand: noch nicht initialisiert."
+        log "State: not yet initialized."
         return 1
     fi
 
-    # Nach dem Import liefert "get Identity spadmin" das Objekt als XML.
+    # After the import, "get Identity spadmin" returns the object as XML.
     if echo "${out}" | grep -qE '<Identity|name="spadmin"'; then
-        log "Zustand: bereits initialisiert."
+        log "State: already initialized."
         return 0
     fi
 
-    # Unklare Ausgabe - zur Sicherheit als "nicht initialisiert" werten.
-    log "Zustand unklar, gehe von 'nicht initialisiert' aus. Ausgabe war:"
+    # Ambiguous output - treat as "not initialized" to be safe.
+    log "State unclear, assuming 'not initialized'. Output was:"
     echo "${out}" | tail -5 | sed 's/^/    /'
     return 1
 }
 
 # ---------------------------------------------------------------------------
-# Patch-Level automatisch aus der mitgelieferten README ableiten.
-# Muster aus Referenzprojekt B - spart eine separate Variable.
+# Derive the patch level from the shipped README.
+# Pattern from reference project B - saves a separate variable.
 # ---------------------------------------------------------------------------
 detect_patch_level() {
     local readme
@@ -198,96 +199,111 @@ detect_patch_level() {
 }
 
 # ---------------------------------------------------------------------------
-# Zertifikate in den Java-Truststore aufnehmen
+# Add certificates to the Java truststore
 # ---------------------------------------------------------------------------
+# Runs in BOTH containers (init and server): the truststore lives in the
+# container's writable layer, so an import done in iiq-init would never
+# reach the iiq JVM. Requires cacerts to be owned by uid 1000 - the
+# Dockerfile chowns it; the stock Temurin image ships it root:root 0644,
+# which made every import fail silently until this was fixed.
 import_certificates() {
     local cert_dir="/data/certs"
     [ -d "${cert_dir}" ] || return 0
 
-    local found=0
     for cert in "${cert_dir}"/*.cer "${cert_dir}"/*.crt "${cert_dir}"/*.pem; do
         [ -e "${cert}" ] || continue
-        found=1
-        local alias
+        local alias out
         alias="$(basename "${cert}")"
-        log "Importiere Zertifikat ${alias} in den Truststore."
-        keytool -importcert -noprompt -trustcacerts \
-                -alias "${alias}" \
-                -file "${cert}" \
-                -cacerts -storepass changeit 2>/dev/null \
-            || log "  (bereits vorhanden oder nicht importierbar - uebersprungen)"
+        log "Importing certificate ${alias} into the truststore."
+        # Keep stderr: only "already exists" is tolerated; anything else
+        # (unwritable store, unparsable file) must be visible and fatal.
+        if out="$(keytool -importcert -noprompt -trustcacerts \
+                    -alias "${alias}" -file "${cert}" \
+                    -cacerts -storepass changeit 2>&1)"; then
+            log "  imported."
+        elif echo "${out}" | grep -q "already exists"; then
+            log "  already present - skipped."
+        else
+            log "  FAILED: ${out}"
+            return 1
+        fi
     done
-    [ "${found}" -eq 1 ] || true
 }
 
 # ---------------------------------------------------------------------------
-# Initialisierung
+# Initialization
 # ---------------------------------------------------------------------------
 run_init() {
     wait_for_db
 
-    import_certificates
-
     if is_initialized; then
-        log "IdentityIQ ist bereits initialisiert - Basisimport wird uebersprungen."
+        log "IdentityIQ is already initialized - skipping base import."
     else
-        log "Erstinitialisierung: importiere init.xml und init-lcm.xml."
-        log "(Das dauert einige Minuten - es werden mehrere tausend Objekte angelegt.)"
-        iiq_console_checked "Basisimport init.xml / init-lcm.xml" <<'EOF'
+        log "First initialization: importing init.xml and init-lcm.xml."
+        log "(Takes several minutes - several thousand objects are created.)"
+        iiq_console_checked "Base import init.xml / init-lcm.xml" <<'EOF'
 import init.xml
 import init-lcm.xml
 EOF
-        log "Basisimport abgeschlossen."
+        log "Base import complete."
 
-        # Patch NACH dem Basisimport - diese Reihenfolge ist zwingend.
+        # Patch AFTER the base import - this order is mandatory.
         local patch_level=""
         if patch_level="$(detect_patch_level)"; then
-            log "Wende Datenbank-Patch ${patch_level} an."
+            log "Applying database patch ${patch_level}."
             "${IIQ_BIN}" patch "${patch_level}"
         else
-            log "Kein Patch erkannt."
+            log "No patch detected."
         fi
 
-        # SERI und Accelerator Pack, falls im Paket enthalten.
+        # SERI and Accelerator Pack, if included in the package.
         if [ -d "${SPHOME}/WEB-INF/config/seri" ]; then
-            log "SERI erkannt - importiere init-seri.xml."
-            echo "import seri/init-seri.xml" | iiq_console_checked "SERI-Import"
+            log "SERI detected - importing init-seri.xml."
+            echo "import seri/init-seri.xml" | iiq_console_checked "SERI import"
         fi
         if [ -f "${SPHOME}/WEB-INF/config/init-acceleratorpack.xml" ]; then
-            log "Accelerator Pack erkannt - importiere init-acceleratorpack.xml."
-            echo "import init-acceleratorpack.xml" | iiq_console_checked "Accelerator-Pack"
+            log "Accelerator Pack detected - importing init-acceleratorpack.xml."
+            echo "import init-acceleratorpack.xml" | iiq_console_checked "Accelerator Pack"
         fi
     fi
 
-    # Eigene Objekte bei JEDEM Init-Lauf einspielen.
-    # Das ist der Entwicklungs-Loop: XML in data/objects aendern,
-    # "docker compose up iiq-init" - fertig, kein Rebuild noetig.
+    # Import custom objects on EVERY init run.
+    # This is the dev loop: edit XML in data/objects,
+    # "docker compose up iiq-init" - done, no rebuild needed.
     import_folder /data/objects
 
-    # Plugins installieren
+    # Install plugins.
+    #
+    # Through the console: the Launcher has no "plugin" application
+    # (only schema/patch/console/encrypt/...), so the earlier
+    # `iiq "plugin install <zip>"` failed on every ZIP and `|| log`
+    # swallowed it. The console command exists (`help plugin`) and its
+    # output is checked like every other import.
     for plugin in /data/plugins/*.zip; do
         [ -e "${plugin}" ] || continue
-        log "Installiere Plugin $(basename "${plugin}")."
-        "${IIQ_BIN}" "plugin install ${plugin}" || \
-            log "  (Installation fehlgeschlagen - ggf. bereits vorhanden)"
+        log "Installing plugin $(basename "${plugin}")."
+        echo "plugin install ${plugin}" \
+            | iiq_console_checked "Plugin $(basename "${plugin}")"
     done
 
-    log "Initialisierung abgeschlossen."
+    log "Initialization complete."
 }
 
 # ---------------------------------------------------------------------------
-# Hauptablauf
+# Main
 # ---------------------------------------------------------------------------
 log "SPHOME=${SPHOME}"
 log "Java: $(java -version 2>&1 | head -1)"
 
+import_certificates
+
 if [ "${INIT:-}" = "y" ]; then
-    log "Betriebsart: INIT (einmalige Initialisierung)"
+    log "Mode: INIT (one-time initialization)"
     run_init
-    log "Init-Container beendet sich planmaessig."
+    log "Init container exiting as planned."
     exit 0
 fi
 
-log "Betriebsart: Anwendungsserver"
+log "Mode: application server"
 wait_for_db
 exec "$@"

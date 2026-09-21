@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# Funktionspruefung der laufenden Umgebung.
+# Functional check of the running environment.
 #
-# Aufruf:  ./scripts/verify.sh
+# Usage:  ./scripts/verify.sh
 #
-# Prueft der Reihe nach:
-#   1. Alle Container laufen und sind gesund
-#   2. Die drei IIQ-Datenbanken existieren und sind gefuellt
-#   3. Die Basiskonfiguration wurde importiert
-#   4. Die Weboberflaeche antwortet
-#   5. Der Quartz-Scheduler laeuft (PostgreSQL-Delegate greift)
-#   6. Mailpit ist erreichbar
+# Checks in order:
+#   1. All containers are running and healthy
+#   2. The three IIQ databases exist and are populated
+#   3. The base configuration was imported
+#   4. The web UI responds
+#   5. The Quartz scheduler runs (PostgreSQL delegate in effect)
+#   6. Mailpit is reachable
+#   7. System landscape: source and target systems
 # ===========================================================================
+# No -e on purpose: every check must run, failures are collected in FAILED.
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${PROJECT_ROOT}"
+
+# Ports and credentials from .env with compose defaults.
+# shellcheck source=scripts/env.sh
+source "${PROJECT_ROOT}/scripts/env.sh"
 
 FAILED=0
 
@@ -25,22 +31,23 @@ fail()  { printf '  [FAIL] %s\n' "$1"; FAILED=1; }
 info()  { printf '         %s\n' "$1"; }
 
 # ---------------------------------------------------------------------------
-# Hilfsfunktionen
+# Helpers
 # ---------------------------------------------------------------------------
 
-# Fuehrt eine Abfrage aus und liefert das Ergebnis ohne Leerraum.
-# Fasst ein Muster zusammen, das sonst achtmal wiederholt wuerde.
+# Runs a query and returns the result stripped of whitespace.
+# Folds a pattern that would otherwise be repeated eight times.
 pq() {
-    docker compose exec -T postgres psql -U postgres -d "$1" -tAc "$2"         2>/dev/null | tr -d '[:space:]'
+    docker compose exec -T postgres psql -U postgres -d "$1" -tAc "$2" \
+        2>/dev/null | tr -d '[:space:]'
 }
 
-# Gibt nur Ziffern zurueck, sonst 0.
+# Returns digits only, otherwise 0.
 #
-# Noetig, weil psql bei fehlendem Container oder fehlender Tabelle
-# Fehlertext statt einer Zahl liefert. Ein ${var:-0} greift dann NICHT
-# (die Variable ist ja nicht leer), und der anschliessende Vergleich
-# scheitert mit "integer expression expected".
-zahl() {
+# Needed because psql emits error text instead of a number when the
+# container or table is missing. ${var:-0} does NOT catch that (the
+# variable is not empty), and the subsequent comparison fails with
+# "integer expression expected".
+as_number() {
     case "$1" in
         ''|*[!0-9]*) echo 0 ;;
         *)           echo "$1" ;;
@@ -48,12 +55,12 @@ zahl() {
 }
 
 # ---------------------------------------------------------------------------
-step "1. Container"
+step "1. Containers"
 # ---------------------------------------------------------------------------
 for svc in postgres iiq mailpit openldap dbgate ldap-ui scim mockapi; do
     cid="$(docker compose ps -q "${svc}" 2>/dev/null)"
     if [ -z "${cid}" ]; then
-        fail "${svc}: laeuft nicht"
+        fail "${svc}: not running"
         continue
     fi
     state="$(docker inspect --format '{{.State.Status}}' "${cid}")"
@@ -65,200 +72,208 @@ for svc in postgres iiq mailpit openldap dbgate ldap-ui scim mockapi; do
     fi
 done
 
-# Der Init-Container MUSS sich mit 0 beendet haben.
+# The init container MUST have exited with 0.
 init_cid="$(docker compose ps -aq iiq-init 2>/dev/null)"
 if [ -n "${init_cid}" ]; then
     code="$(docker inspect --format '{{.State.ExitCode}}' "${init_cid}")"
     if [ "${code}" = "0" ]; then
-        ok "iiq-init: sauber beendet (Code 0)"
+        ok "iiq-init: exited cleanly (code 0)"
     else
-        fail "iiq-init: Exitcode ${code} - Initialisierung fehlgeschlagen"
+        fail "iiq-init: exit code ${code} - initialisation failed"
     fi
 fi
 
 # ---------------------------------------------------------------------------
-step "2. Datenbank"
+step "2. Database"
 # ---------------------------------------------------------------------------
 for db in identityiq identityiqah identityiqPlugin; do
     if docker compose exec -T postgres psql -U postgres -tAc \
            "SELECT 1 FROM pg_database WHERE datname='${db}';" 2>/dev/null | grep -q 1; then
-        ok "Datenbank ${db} vorhanden"
+        ok "database ${db} present"
     else
-        fail "Datenbank ${db} fehlt"
+        fail "database ${db} missing"
     fi
 done
 
 tables="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
     "SELECT count(*) FROM information_schema.tables WHERE table_schema='identityiq';" 2>/dev/null | tr -d '[:space:]')"
 if [ "${tables:-0}" -gt 200 ]; then
-    ok "identityiq: ${tables} Tabellen"
+    ok "identityiq: ${tables} tables"
 else
-    fail "identityiq: nur ${tables:-0} Tabellen (erwartet: ueber 200)"
+    fail "identityiq: only ${tables:-0} tables (expected: over 200)"
 fi
 
 # ---------------------------------------------------------------------------
-step "3. Basiskonfiguration"
+step "3. Base configuration"
 # ---------------------------------------------------------------------------
 identities="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
     "SELECT count(*) FROM identityiq.spt_identity;" 2>/dev/null | tr -d '[:space:]')"
 if [ "${identities:-0}" -ge 1 ]; then
-    ok "spt_identity: ${identities} Eintraege (spadmin vorhanden)"
+    ok "spt_identity: ${identities} rows (spadmin present)"
 else
-    fail "spt_identity ist leer - init.xml wurde nicht importiert"
+    fail "spt_identity is empty - init.xml was not imported"
 fi
 
 objects="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
     "SELECT count(*) FROM identityiq.spt_configuration;" 2>/dev/null | tr -d '[:space:]')"
 if [ "${objects:-0}" -ge 1 ]; then
-    ok "spt_configuration: ${objects} Eintraege"
+    ok "spt_configuration: ${objects} rows"
 else
-    fail "spt_configuration ist leer"
+    fail "spt_configuration is empty"
 fi
 
-# Wurde die eigene Mail-Konfiguration uebernommen?
+# Was the custom mail configuration applied?
 mailhost="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
     "SELECT count(*) FROM identityiq.spt_configuration WHERE name='SystemConfiguration';" 2>/dev/null | tr -d '[:space:]')"
 if [ "${mailhost:-0}" -ge 1 ]; then
-    ok "SystemConfiguration vorhanden"
+    ok "SystemConfiguration present"
 else
-    info "SystemConfiguration nicht gefunden"
+    info "SystemConfiguration not found"
 fi
 
 # ---------------------------------------------------------------------------
-step "4. Weboberflaeche"
+step "4. Web UI"
 # ---------------------------------------------------------------------------
-port="$(grep -E '^IIQ_HTTP_PORT=' .env 2>/dev/null | cut -d= -f2)"
-port="${port:-8080}"
+port="${IIQ_HTTP_PORT}"
+# curl prints the -w code even when it exits non-zero (e.g. --max-time hit while
+# the body was still streaming on a busy JVM); appending a fallback to that
+# once produced "HTTP 200000". Fall back only when nothing was printed.
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
-        "http://localhost:${port}/identityiq/login.jsf" 2>/dev/null || echo 000)"
+        "http://localhost:${port}/identityiq/login.jsf" 2>/dev/null)" || true
+code="${code:-000}"
 if [ "${code}" = "200" ] || [ "${code}" = "302" ]; then
-    ok "Login-Seite antwortet (HTTP ${code})"
+    ok "login page responds (HTTP ${code})"
     info "http://localhost:${port}/identityiq  -  spadmin / admin"
 else
-    fail "Login-Seite antwortet nicht (HTTP ${code})"
-    info "Tomcat braucht nach dem Start 1-3 Minuten. Logs: docker compose logs -f iiq"
+    fail "login page does not respond (HTTP ${code})"
+    info "Tomcat needs 1-3 minutes after start. Logs: docker compose logs -f iiq"
 fi
 
 # ---------------------------------------------------------------------------
-step "5. Quartz-Scheduler (PostgreSQL-Delegate)"
+step "5. Quartz scheduler (PostgreSQL delegate)"
 # ---------------------------------------------------------------------------
-# Wenn der Delegate falsch waere, blieben diese Tabellen leer bzw. der
-# Scheduler wuerde beim Start mit einer Exception abbrechen.
+# With a wrong delegate these tables would stay empty, or the scheduler
+# would abort at startup with an exception.
 triggers="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
     "SELECT count(*) FROM identityiq.qrtz221_triggers;" 2>/dev/null | tr -d '[:space:]')"
 if [ -n "${triggers}" ] && [ "${triggers}" -ge 0 ] 2>/dev/null; then
-    ok "Quartz-Tabellen ansprechbar (${triggers} Trigger)"
+    ok "Quartz tables readable (${triggers} triggers)"
 else
-    fail "Quartz-Tabellen nicht lesbar"
+    fail "Quartz tables not readable"
 fi
 
 if docker compose logs iiq 2>/dev/null | grep -qiE "quartz.*(exception|error)"; then
-    fail "Im Log stehen Quartz-Fehler - Delegate pruefen"
+    fail "Quartz errors in the log - check the delegate"
     info "docker compose logs iiq | grep -i quartz"
 else
-    ok "Keine Quartz-Fehler im Log"
+    ok "no Quartz errors in the log"
 fi
 
 # ---------------------------------------------------------------------------
 step "6. Mailpit"
 # ---------------------------------------------------------------------------
-mp_port="$(grep -E '^MAILPIT_UI_PORT=' .env 2>/dev/null | cut -d= -f2)"
-mp_port="${mp_port:-8025}"
+mp_port="${MAILPIT_UI_PORT}"
 if curl -s --max-time 10 "http://localhost:${mp_port}/api/v1/info" >/dev/null 2>&1; then
-    ok "Mailpit erreichbar auf http://localhost:${mp_port}"
+    ok "Mailpit reachable at http://localhost:${mp_port}"
 else
-    fail "Mailpit antwortet nicht"
+    fail "Mailpit does not respond"
 fi
 
 # ---------------------------------------------------------------------------
-step "7. Systemlandschaft: Quelle und Zielsysteme"
+step "7. System landscape: source and target systems"
 # ---------------------------------------------------------------------------
-# Geprueft wird, dass die Objekte da sind und die Verbindungen stehen.
-# Ob die Aggregation schon Daten geliefert hat, haengt davon ab, ob die
-# Aufgaben gelaufen sind - das entscheidet der Anwender (Setup > Tasks).
+# Verifies that the objects exist and the connections are up. Whether
+# aggregation has already delivered data depends on whether the tasks
+# have run - that is up to the user (Setup > Tasks).
 
-apps="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc         "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_application;" 2>/dev/null | tr -d '[:space:]')"
+apps="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
+        "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_application;" 2>/dev/null | tr -d '[:space:]')"
 
-for erwartet in HR-Application LDAP-Target JDBC-Target SCIM-Target WebService-Target; do
-    if echo "${apps}" | grep -q "${erwartet}"; then
-        ok "Applikation vorhanden: ${erwartet}"
+for expected in HR-Application LDAP-Target JDBC-Target SCIM-Target WebService-Target; do
+    if echo "${apps}" | grep -q "${expected}"; then
+        ok "application present: ${expected}"
     else
-        fail "Applikation fehlt: ${erwartet}"
+        fail "application missing: ${expected}"
     fi
 done
 
-# Die HR-CSV muss im Container unter genau dem Pfad liegen, der in der
-# Application steht - ein haeufiger Fehler nach Aenderungen am Mount.
-# Der Pfad steht in einfachen Anfuehrungszeichen innerhalb von sh -c:
-# Git Bash unter Windows wandelt sonst /data/hr in einen
-# Windows-Pfad um (MSYS-Pfadkonvertierung), und der Test schlaegt
-# fehl, obwohl die Datei im Container liegt.
+# The HR CSV must be at exactly the path configured in the Application -
+# a common error after mount changes.
+# The path is single-quoted inside sh -c: Git Bash on Windows would
+# otherwise rewrite /data/hr into a Windows path (MSYS path conversion),
+# and the test fails although the file is in the container.
 if docker compose exec -T iiq sh -c 'test -r /data/hr/HR-people.csv' 2>/dev/null; then
-    zeilen="$(zahl "$(docker compose exec -T iiq sh -c 'wc -l < /data/hr/HR-people.csv' 2>/dev/null | tr -d '[:space:]')")"
-    ok "HR-CSV im Container lesbar (${zeilen} Zeilen inkl. Kopfzeile)"
+    lines="$(as_number "$(docker compose exec -T iiq sh -c 'wc -l < /data/hr/HR-people.csv' 2>/dev/null | tr -d '[:space:]')")"
+    ok "HR CSV readable in the container (${lines} lines incl. header)"
 else
-    fail "HR-CSV nicht unter /data/hr/HR-people.csv erreichbar"
-    info "Mount pruefen: docker compose config | grep -A3 'data/hr'"
+    fail "HR CSV not reachable at /data/hr/HR-people.csv"
+    info "check the mount: docker compose config | grep -A3 'data/hr'"
 fi
 
-target_accounts="$(zahl "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                    'SELECT count(*) FROM targetapp."IIQData";' 2>/dev/null | tr -d '[:space:]')")"
+target_accounts="$(as_number "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc \
+                   'SELECT count(*) FROM targetapp."IIQData";' 2>/dev/null | tr -d '[:space:]')")"
 if [ -n "${target_accounts}" ]; then
-    target_rollen="$(zahl "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc                      'SELECT count(*) FROM targetapp."IIQRoles";' 2>/dev/null | tr -d '[:space:]')")"
-    ok "Zieldatenbank targetdb erreichbar (${target_accounts} Konten, ${target_rollen} Rollen)"
+    target_roles="$(as_number "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc \
+                    'SELECT count(*) FROM targetapp."IIQRoles";' 2>/dev/null | tr -d '[:space:]')")"
+    ok "target database targetdb reachable (${target_accounts} accounts, ${target_roles} roles)"
 else
-    fail "Zieldatenbank targetdb nicht lesbar"
+    fail "target database targetdb not readable"
 fi
 
-# Ohne die Regeln kann IIQ ins JDBC-Ziel nicht schreiben.
-regeln="$(zahl "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc           "SELECT count(*) FROM identityiq.spt_rule WHERE name LIKE 'JDBC-Target%';" 2>/dev/null | tr -d '[:space:]')")"
-if [ "${regeln:-0}" -ge 6 ]; then
-    ok "JDBC-Provisioning-Regeln vorhanden (${regeln})"
+# Without the rules IIQ cannot write to the JDBC target.
+rules="$(as_number "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
+         "SELECT count(*) FROM identityiq.spt_rule WHERE name LIKE 'JDBC-Target%';" 2>/dev/null | tr -d '[:space:]')")"
+if [ "${rules:-0}" -ge 6 ]; then
+    ok "JDBC provisioning rules present (${rules})"
 else
-    fail "Es fehlen JDBC-Regeln (gefunden: ${regeln:-0}, erwartet: 6)"
+    fail "JDBC rules missing (found: ${rules:-0}, expected: 6)"
 fi
 
-ldap_gruppen="$(zahl "$(docker compose exec -T openldap ldapsearch -x -H ldap://localhost:1389                 -D "cn=admin,dc=example,dc=com" -w adminpassword                 -b "ou=groups,dc=example,dc=com" '(objectClass=groupOfNames)' dn 2>/dev/null                 | grep -c '^dn:' | tr -d '[:space:]')")"
-if [ "${ldap_gruppen:-0}" -ge 10 ]; then
-    ok "LDAP-Gruppen als Entitlements vorhanden (${ldap_gruppen})"
+ldap_groups="$(as_number "$(docker compose exec -T openldap ldapsearch -x -H ldap://localhost:1389 \
+               -D "cn=${LDAP_ADMIN_USER},${LDAP_ROOT}" -w "${LDAP_ADMIN_PASSWORD}" \
+               -b "ou=groups,${LDAP_ROOT}" '(objectClass=groupOfNames)' dn 2>/dev/null \
+               | grep -c '^dn:' | tr -d '[:space:]')")"
+if [ "${ldap_groups:-0}" -ge 10 ]; then
+    ok "LDAP groups present as entitlements (${ldap_groups})"
 else
-    fail "Zu wenige LDAP-Gruppen (${ldap_gruppen:-0})"
-    info "Bei 0: LDIF-Import abgebrochen - groupOfNames braucht mindestens ein member"
+    fail "too few LDAP groups (${ldap_groups:-0})"
+    info "if 0: LDIF import aborted - groupOfNames needs at least one member"
 fi
 
-# Die beiden zuletzt ergaenzten Zielsysteme sind eigene Dienste - ohne
-# sie laufen SCIM- und WebService-Aggregation ins Leere.
-scim_port="$(grep -E '^SCIM_PORT=' .env 2>/dev/null | cut -d= -f2)"
-scim_port="${scim_port:-8100}"
-if curl -s --max-time 10 -H "Authorization: Bearer ${SCIM_API_KEY:-secret}"         "http://localhost:${scim_port}/ServiceProviderConfig" >/dev/null 2>&1; then
-    ok "SCIM-Server erreichbar auf http://localhost:${scim_port}"
+# The two most recently added targets are separate services - without
+# them SCIM and WebService aggregation run into nothing.
+scim_port="${SCIM_PORT}"
+if curl -s --max-time 10 -H "Authorization: Bearer ${SCIM_API_KEY}" \
+        "http://localhost:${scim_port}/ServiceProviderConfig" >/dev/null 2>&1; then
+    ok "SCIM server reachable at http://localhost:${scim_port}"
 else
-    fail "SCIM-Server antwortet nicht"
+    fail "SCIM server does not respond"
 fi
 
-mock_port="$(grep -E '^MOCKAPI_PORT=' .env 2>/dev/null | cut -d= -f2)"
-mock_port="${mock_port:-8200}"
-# /api/v1/health kommt bewusst ohne Token aus.
+mock_port="${MOCKAPI_PORT}"
+# /api/v1/health deliberately needs no token.
 if curl -s --max-time 10 "http://localhost:${mock_port}/api/v1/health" >/dev/null 2>&1; then
-    ok "Mock-REST-API erreichbar auf http://localhost:${mock_port}"
+    ok "mock REST API reachable at http://localhost:${mock_port}"
 else
-    fail "Mock-REST-API antwortet nicht"
+    fail "mock REST API does not respond"
 fi
 
-# Ohne extendedNumber findet kein Filter die Attribute - dann laufen
-# Rollenzuweisung und Manager-Korrelation still ins Leere.
-erweitert="$(zahl "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc              "SELECT count(*) FROM identityiq.spt_identity WHERE extended1 IS NOT NULL;" 2>/dev/null | tr -d '[:space:]')")"
-if [ "${erweitert:-0}" -gt 0 ]; then
-    ok "Identitaetsattribute befuellt (${erweitert} mit employeeNumber)"
+# Without extendedNumber no filter finds the attributes - role assignment
+# and manager correlation then silently run into nothing.
+extended="$(as_number "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
+            "SELECT count(*) FROM identityiq.spt_identity WHERE extended1 IS NOT NULL;" 2>/dev/null | tr -d '[:space:]')")"
+if [ "${extended:-0}" -gt 0 ]; then
+    ok "identity attributes populated (${extended} with employeeNumber)"
 else
-    info "Noch keine Identitaetsattribute - Aggregation noch nicht gestartet"
+    info "no identity attributes yet - aggregation not started"
 fi
 
 # ---------------------------------------------------------------------------
 printf '\n'
 if [ "${FAILED}" -eq 0 ]; then
-    printf '=== Alle Pruefungen bestanden ===\n\n'
+    printf '=== All checks passed ===\n\n'
     exit 0
 else
-    printf '=== Es gab Fehler (siehe oben) ===\n\n'
+    printf '=== There were failures (see above) ===\n\n'
     exit 1
 fi

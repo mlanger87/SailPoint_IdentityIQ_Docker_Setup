@@ -2,57 +2,63 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  Web-Services-Applikation - viertes Zielsystem
+  Web Services application: fourth target system
   ===========================================================================
-  Spricht die Mock-REST-API im Container "mockapi" an. Anders als der
-  SCIM-Connector, der ein festes Protokoll voraussetzt, wird hier JEDER
-  Endpunkt einzeln beschrieben - das ist der uebliche Fall bei
-  hauseigenen Schnittstellen.
+  Talks to the mock REST API in the container "mockapi". Unlike the SCIM
+  connector, which presupposes a fixed protocol, here EVERY endpoint is
+  described individually; that is the usual case with in-house APIs.
 
-  Die gueltigen Werte stammen aus der mitgelieferten Formulardefinition
-  WEB-INF/config/connector/WebServices.xml, nicht aus Beispielen:
+  The valid values come from the shipped form definition
+  WEB-INF/config/connector/WebServices.xml, not from examples:
 
     authenticationMethod
-        BasicLogin    Benutzer und Passwort
-        OAuthLogin    API-Token (hier verwendet)
-        OAuth2Login   vollstaendiger OAuth-2-Fluss
-        No Auth       keine oder eigene Authentifizierung
+        BasicLogin    user and password
+        OAuthLogin    API token (used here)
+        OAuth2Login   full OAuth 2 flow
+        No Auth       none or custom authentication
 
     operationType
         Test Connection, Account Aggregation,
         Account Delta Aggregation, Group Aggregation,
         Get Object, Get Object-Group,
         Create Account, Update Account, Delete Account,
-        Enable Account, Disable Account
+        Enable Account, Disable Account,
+        Add Entitlement, Remove Entitlement
 
-  Aufbau: genericWebServiceBaseUrl gibt die Basis vor, jeder Eintrag in
-  connectionParameters beschreibt einen Endpunkt relativ dazu.
+  Layout: genericWebServiceBaseUrl sets the base, each entry in
+  connectionParameters describes one endpoint relative to it.
 
-  Die drei Stellen, an denen solche Anbindungen typischerweise scheitern:
+  The places where such integrations typically fail:
 
-    1. rootPath - die API liefert die Datensaetze unter "data", nicht auf
-       oberster Ebene. Der Eintrag gehoert auf ENDPUNKT-Ebene (in der
-       Oberflaeche: Menue "Response Information"), NICHT in die
-       resMappingObj-Map. Falsch verschachtelt meldet die Aggregation
-       Success und verarbeitet null Datensaetze.
+    1. rootPath: the API returns the records under "data", not at top
+       level. The entry belongs on the ENDPOINT level (in the UI: menu
+       "Response Information"), NOT inside the resMappingObj map. Nested
+       wrongly, the aggregation reports Success and processes zero
+       records.
 
-    2. Paging - diese API nutzt offset/limit, andere page/size oder einen
-       Cursor. Fehlt die Konfiguration, liest der Connector nur die erste
-       Seite und meldet trotzdem Erfolg.
+    2. Paging: this API uses offset/limit, others page/size or a cursor.
+       Without the configuration the connector reads only the first page
+       and still reports success.
 
-    3. $plan.* / $response.* - die Platzhalter, ueber die Werte in den
-       Rumpf gelangen. Ein Tippfehler darin bleibt unbemerkt, das Feld
-       wird einfach leer uebertragen.
+    3. $plan.* / $response.*: the placeholders through which values reach
+       the body. A typo in them goes unnoticed; the field is simply sent
+       empty.
 
-    4. Der Name des Rumpf-Feldes haengt am bodyFormat:
+    4. The name of the body field depends on bodyFormat:
            bodyFormat="raw"   ->  rawBody
            bodyFormat="json"  ->  jsonBody
-       Der falsche Name laesst die Initialisierung der Facade mit
-       einer NullPointerException abbrechen - die Konsole meldet nur
-       "null", ohne Hinweis auf die Ursache.
+       The wrong name makes the facade initialization abort with a
+       NullPointerException; the console reports only "null", with no
+       hint at the cause.
   ===========================================================================
 -->
 <sailpoint>
+
+  <CorrelationConfig name="WebService Correlation">
+    <AttributeAssignments>
+      <Filter operation="EQ" property="employeeNumber" value="employeeId"/>
+    </AttributeAssignments>
+  </CorrelationConfig>
 
   <Application connector="sailpoint.connector.webservices.WebServicesConnector"
                featuresString="PROVISIONING, ENABLE, SEARCH, ACCOUNT_ONLY_REQUEST"
@@ -71,9 +77,9 @@
         <entry key="genericWebServiceBaseUrl" value="http://mockapi:8000"/>
 
         <!--
-          OAuthLogin bedeutet hier: statischer API-Token im
-          Authorization-Header. Nicht zu verwechseln mit OAuth2Login,
-          das einen Token-Fluss mit token_url erwartet.
+          OAuthLogin here means: static API token in the Authorization
+          header. Not to be confused with OAuth2Login, which expects a
+          token flow with token_url.
         -->
         <entry key="authenticationMethod" value="OAuthLogin"/>
         <entry key="accesstoken" value="mocktoken"/>
@@ -87,7 +93,7 @@
 
         <!--
           =================================================================
-          Die Endpunkte
+          The endpoints
           =================================================================
         -->
         <entry key="connectionParameters">
@@ -95,11 +101,11 @@
             <List>
 
               <!-- ===================================================
-                   Verbindungstest
+                   Connection test
                    ===================================================
-                   Nutzt /health, das bewusst ohne Token auskommt: So
-                   laesst sich unterscheiden, ob der Dienst nicht
-                   erreichbar ist oder die Anmeldung scheitert.
+                   Uses /health, which deliberately needs no token: this
+                   distinguishes "service unreachable" from "login
+                   fails".
               -->
               <Map>
                 <entry key="operationType" value="Test Connection"/>
@@ -123,12 +129,11 @@
               </Map>
 
               <!-- ===================================================
-                   Kontenaggregation mit Paging
+                   Account aggregation with paging
                    ===================================================
-                   rootPath zeigt auf "data" - dort liegen die
-                   Datensaetze. Das Paging laeuft ueber offset/limit;
-                   der Connector zaehlt offset selbst hoch, solange
-                   Datensaetze zurueckkommen.
+                   rootPath points to "data", where the records are.
+                   Paging runs via offset/limit; the connector increments
+                   offset itself as long as records keep coming back.
               -->
               <Map>
                 <entry key="operationType" value="Account Aggregation"/>
@@ -155,16 +160,16 @@
                     <Map>
                       <entry key="nativeIdentity" value="id"/>
                       <!--
-                        id muss zusaetzlich abgebildet werden: Das Schema
-                        fuehrt identityAttribute="id", und der Connector
-                        sucht genau diesen Namen in der erzeugten Map.
-                        nativeIdentity allein genuegt nicht - die
-                        Aggregation meldet dann Success und verarbeitet
-                        null Datensaetze.
+                        id must be mapped in addition: the schema has
+                        identityAttribute="id", and the connector looks
+                        for exactly that name in the generated map.
+                        nativeIdentity alone is not enough; the
+                        aggregation then reports Success and processes
+                        zero records.
 
-                        Beim Gruppen-Schema faellt das nicht auf, weil
-                        dort identityAttribute="name" ist und "name"
-                        ohnehin im Mapping steht.
+                        With the group schema this does not show because
+                        there identityAttribute="name" and "name" is in
+                        the mapping anyway.
                       -->
                       <entry key="id" value="id"/>
                       <entry key="employeeId" value="employeeId"/>
@@ -182,26 +187,25 @@
                   </value>
                 </entry>
                 <!--
-                  KEIN Paging konfiguriert - bewusst.
+                  NO paging configured, deliberately.
 
-                  paginationSteps ist laut Formulardefinition ein
-                  Textarea, also ein URL-Fragment mit Platzhaltern, kein
-                  Schluesselwort. Ein blosses "offset" wird nicht als
-                  Paging erkannt: Der Connector ruft dann denselben
-                  Endpunkt ohne Parameter immer wieder auf und haelt nie
-                  an. Gemessen: 11.943 Aufrufe, bis die Aufgabe von Hand
-                  beendet wurde.
+                  According to the form definition paginationSteps is a
+                  textarea, i.e. a URL fragment with placeholders, not a
+                  keyword. A bare "offset" is not recognized as paging:
+                  the connector then calls the same endpoint without
+                  parameters over and over and never stops. Measured:
+                  11,943 requests until the task was terminated by hand.
 
-                  Fuer die Datenmenge dieser Umgebung ist Paging ohnehin
-                  unnoetig - die API liefert bis zu 200 Datensaetze am
-                  Stueck. Wer es braucht, konfiguriert es ueber die
-                  Oberflaeche (Application > Settings > Paging) und
-                  exportiert das erzeugte Fragment.
+                  For the data volume of this environment paging is
+                  unnecessary anyway; the API returns up to 200 records
+                  in one go. If needed, configure it in the UI
+                  (Application > Settings > Paging) and export the
+                  generated fragment.
                 -->
               </Map>
 
               <!-- ===================================================
-                   Gruppenaggregation - die Entitlements
+                   Group aggregation: the entitlements
                    =================================================== -->
               <Map>
                 <entry key="operationType" value="Group Aggregation"/>
@@ -235,10 +239,10 @@
               </Map>
 
               <!-- ===================================================
-                   Einzelabruf nach dem Provisionieren
+                   Single fetch after provisioning
                    ===================================================
-                   $plan.nativeIdentity$ setzt der Connector aus der
-                   Kennung des betroffenen Kontos ein.
+                   The connector substitutes $plan.nativeIdentity$ with
+                   the identifier of the affected account.
               -->
               <Map>
                 <entry key="operationType" value="Get Object"/>
@@ -259,12 +263,25 @@
                     </List>
                   </value>
                 </entry>
+                <!--
+                  Same mapping as the aggregation, including id: the
+                  single fetch feeds the same schema, and a partial map
+                  would wipe the unmapped attributes from the link.
+                -->
                 <entry key="resMappingObj">
                   <value>
                     <Map>
                       <entry key="nativeIdentity" value="id"/>
+                      <entry key="id" value="id"/>
                       <entry key="employeeId" value="employeeId"/>
                       <entry key="login" value="login"/>
+                      <entry key="firstName" value="firstName"/>
+                      <entry key="lastName" value="lastName"/>
+                      <entry key="fullName" value="fullName"/>
+                      <entry key="email" value="email"/>
+                      <entry key="jobTitle" value="jobTitle"/>
+                      <entry key="department" value="department"/>
+                      <entry key="office" value="office"/>
                       <entry key="status" value="status"/>
                       <entry key="roles" value="roles"/>
                     </Map>
@@ -273,13 +290,12 @@
               </Map>
 
               <!-- ===================================================
-                   Konto anlegen
+                   Create account
                    ===================================================
-                   Die $plan.*$-Platzhalter werden aus dem
-                   ProvisioningPlan gefuellt. Die Namen muessen exakt
-                   den Attributen der Create-Policy entsprechen - ein
-                   Tippfehler faellt nicht auf, das Feld bleibt
-                   stillschweigend leer.
+                   The $plan.*$ placeholders are filled from the
+                   ProvisioningPlan. The names must match the attributes
+                   of the create policy exactly; a typo goes unnoticed,
+                   the field silently stays empty.
               -->
               <Map>
                 <entry key="operationType" value="Create Account"/>
@@ -335,8 +351,20 @@
               </Map>
 
               <!-- ===================================================
-                   Konto aendern
-                   =================================================== -->
+                   Update account: scalar attributes only
+                   ===================================================
+                   Roles are NOT in this body. A PATCH with
+                   {"roles": [...]} replaces the whole list, so a single
+                   role removal would have wiped every other role. The
+                   deltas go through the two entitlement endpoints below.
+
+                   Known connector behaviour: a $plan.x$ placeholder for
+                   an attribute absent from the plan renders as an empty
+                   string, so an update that changes only jobTitle sends
+                   the other three fields empty. Acceptable for the mock;
+                   a real API would want one endpoint per attribute or a
+                   before-provisioning rule that trims the body.
+              -->
               <Map>
                 <entry key="operationType" value="Update Account"/>
                 <entry key="uniqueNameForEndPoint" value="UpdateAccount"/>
@@ -357,7 +385,10 @@
                       <entry key="rawBody">
                         <value>
                           <String><![CDATA[{
-  "roles": $plan.roles$
+  "jobTitle": "$plan.jobTitle$",
+  "department": "$plan.department$",
+  "office": "$plan.office$",
+  "email": "$plan.email$"
 }]]></String>
                         </value>
                       </entry>
@@ -374,10 +405,72 @@
               </Map>
 
               <!-- ===================================================
-                   Konto deaktivieren statt loeschen
+                   Entitlement deltas: one call per role
                    ===================================================
-                   Wie beim JDBC-Zielsystem: Die Daten bleiben aus
-                   Nachweisgruenden erhalten, nur der Status wechselt.
+                   The connector splits an AttributeRequest on "roles"
+                   into one call per value; $plan.roles$ then carries a
+                   single role name. The mock implements both routes.
+              -->
+              <Map>
+                <entry key="operationType" value="Add Entitlement"/>
+                <entry key="uniqueNameForEndPoint" value="AddEntitlement"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$/roles"/>
+                <entry key="httpMethodType" value="POST"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Content-Type" value="application/json"/>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="body">
+                  <value>
+                    <Map>
+                      <entry key="bodyFormat" value="raw"/>
+                      <entry key="rawBody">
+                        <value>
+                          <String><![CDATA[{"role": "$plan.roles$"}]]></String>
+                        </value>
+                      </entry>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+              <Map>
+                <entry key="operationType" value="Remove Entitlement"/>
+                <entry key="uniqueNameForEndPoint" value="RemoveEntitlement"/>
+                <entry key="contextUrl" value="/api/v1/users/$plan.nativeIdentity$/roles/$plan.roles$"/>
+                <entry key="httpMethodType" value="DELETE"/>
+                <entry key="header">
+                  <value>
+                    <Map>
+                      <entry key="Accept" value="application/json"/>
+                    </Map>
+                  </value>
+                </entry>
+                <entry key="responseCode">
+                  <value>
+                    <List>
+                      <Integer>200</Integer>
+                    </List>
+                  </value>
+                </entry>
+              </Map>
+
+              <!-- ===================================================
+                   Disable account instead of deleting it
+                   ===================================================
+                   As with the JDBC target system: the data is retained
+                   for audit reasons, only the status changes.
               -->
               <Map>
                 <entry key="operationType" value="Disable Account"/>
@@ -448,11 +541,11 @@
               </Map>
 
               <!-- ===================================================
-                   Konto loeschen
+                   Delete account
                    ===================================================
-                   Angelegt, aber im Leaver-Workflow nicht benutzt -
-                   dort wird deaktiviert. Vorhanden, damit sich der
-                   Fall bei Bedarf testen laesst.
+                   Defined but not used by the leaver workflow, which
+                   disables instead. Present so the case can be tested
+                   when needed.
               -->
               <Map>
                 <entry key="operationType" value="Delete Account"/>
@@ -480,6 +573,7 @@
           </value>
         </entry>
 
+        <entry key="templateApplication" value="Web Services"/>
         <entry key="sysDescriptions">
           <value>
             <Map>
@@ -512,9 +606,9 @@
           <Field name="login" required="true" type="string">
             <Script>
               <Source><![CDATA[
-                // Anmeldename aus der Mailadresse - dasselbe Muster wie
-                // bei den Bestandskonten, damit angelegte und
-                // vorhandene Konten gleich aussehen.
+                // Login name from the e-mail address, the same pattern as
+                // the existing accounts, so that created and pre-existing
+                // accounts look alike.
                 String mail = identity.getEmail();
                 if (mail != null && mail.indexOf("@") > 0) {
                     return mail.substring(0, mail.indexOf("@"));
@@ -564,9 +658,9 @@
 
     <Schemas>
       <!--
-        nativeIdentity ist die vom Server vergebene UUID (id), weil der
-        Connector Konten darueber adressiert. Korreliert wird dagegen
-        ueber employeeId - die UUID ist beim Anlegen noch unbekannt.
+        nativeIdentity is the server-assigned UUID (id) because the
+        connector addresses accounts by it. Correlation, however, runs on
+        employeeId; the UUID is still unknown at create time.
       -->
       <Schema displayAttribute="fullName"
               identityAttribute="id"
@@ -574,41 +668,41 @@
               nativeObjectType="account"
               objectType="account">
         <AttributeDefinition name="id" type="string">
-          <Description>Vom Zielsystem vergebene Kennung</Description>
+          <Description>Identifier assigned by the target system</Description>
         </AttributeDefinition>
         <AttributeDefinition name="employeeId" type="string">
-          <Description>Personalnummer - Schluessel fuer die Korrelation</Description>
+          <Description>Employee number, the correlation key</Description>
         </AttributeDefinition>
         <AttributeDefinition name="login" type="string">
-          <Description>Anmeldename</Description>
+          <Description>Login name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="firstName" type="string">
-          <Description>Vorname</Description>
+          <Description>First name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="lastName" type="string">
-          <Description>Nachname</Description>
+          <Description>Last name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="fullName" type="string">
-          <Description>Anzeigename</Description>
+          <Description>Display name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="email" type="string">
-          <Description>Mailadresse</Description>
+          <Description>E-mail address</Description>
         </AttributeDefinition>
         <AttributeDefinition name="jobTitle" type="string">
-          <Description>Funktionsbezeichnung</Description>
+          <Description>Job title</Description>
         </AttributeDefinition>
         <AttributeDefinition name="department" type="string">
-          <Description>Abteilung</Description>
+          <Description>Department</Description>
         </AttributeDefinition>
         <AttributeDefinition name="office" type="string">
-          <Description>Standort</Description>
+          <Description>Location</Description>
         </AttributeDefinition>
         <AttributeDefinition name="status" type="string">
-          <Description>ACTIVE oder DISABLED</Description>
+          <Description>ACTIVE or DISABLED</Description>
         </AttributeDefinition>
         <AttributeDefinition entitlement="true" managed="true" multi="true"
                              name="roles" schemaObjectType="group" type="string">
-          <Description>Rollen im Zielsystem</Description>
+          <Description>Roles in the target system</Description>
         </AttributeDefinition>
       </Schema>
 
@@ -618,32 +712,38 @@
               nativeObjectType="group"
               objectType="group">
         <AttributeDefinition name="name" type="string">
-          <Description>Name der Rolle</Description>
+          <Description>Role name</Description>
         </AttributeDefinition>
         <AttributeDefinition name="description" type="string">
-          <Description>Beschreibung</Description>
+          <Description>Description</Description>
         </AttributeDefinition>
       </Schema>
     </Schemas>
 
   </Application>
 
-  <CorrelationConfig name="WebService Correlation">
-    <AttributeAssignments>
-      <Filter operation="EQ" property="employeeNumber" value="employeeId"/>
-    </AttributeAssignments>
-  </CorrelationConfig>
-
   <TaskDefinition name="WebService Aggregation"
                   executor="sailpoint.task.ResourceIdentityScan"
                   progressMode="Percentage"
                   resultAction="Delete"
-                  template="true"
                   type="AccountAggregation">
-    <Description>Liest die Konten der REST-API und korreliert sie ueber employeeId.</Description>
+    <Description>Reads the accounts of the REST API and correlates them via employeeId.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="WebService-Target"/>
+        <!--
+          A target keeps accounts that were deleted natively unless this is
+          set; the stock template leaves it false. Measured: 85 entries removed
+          from the directory, aggregation "Success", 90 links still there.
+        -->
+        <entry key="checkDeleted">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
         <entry key="correlateEntitlements">
           <value>
             <Boolean>true</Boolean>
@@ -661,9 +761,11 @@
                   progressMode="String"
                   resultAction="Delete"
                   subType="task_item_type_acct_grp_aggregation"
-                  template="true"
                   type="AccountGroupAggregation">
-    <Description>Laedt die Rollen der REST-API als Entitlements.</Description>
+    <Description>Loads the roles of the REST API as entitlements.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Group Aggregation"/>
+    </Parent>
     <Attributes>
       <Map>
         <entry key="applications" value="WebService-Target"/>

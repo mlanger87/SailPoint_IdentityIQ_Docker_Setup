@@ -1,23 +1,25 @@
 <#
 .SYNOPSIS
-    Sammelskript fuer den Alltag mit der IdentityIQ-Umgebung.
+    Day-to-day helper for the IdentityIQ environment.
 
 .EXAMPLE
-    .\scripts\iiq.ps1 console       # IdentityIQ-Konsole oeffnen
-    .\scripts\iiq.ps1 import        # data\objects erneut importieren
-    .\scripts\iiq.ps1 logs          # Logs von IdentityIQ folgen
-    .\scripts\iiq.ps1 status        # Zustand aller Container
-    .\scripts\iiq.ps1 psql          # psql auf der IIQ-Datenbank
-    .\scripts\iiq.ps1 reset         # ALLES zuruecksetzen (mit Rueckfrage)
+    .\scripts\iiq.ps1 console       # open the IdentityIQ console
+    .\scripts\iiq.ps1 import        # re-import data\objects
+    .\scripts\iiq.ps1 logs          # follow IdentityIQ logs
+    .\scripts\iiq.ps1 status        # state of all containers
+    .\scripts\iiq.ps1 psql          # psql on the IIQ database
+    .\scripts\iiq.ps1 seed-scim     # (re)create the SCIM seed accounts
+    .\scripts\iiq.ps1 reset         # reset EVERYTHING (with confirmation)
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('console', 'import', 'logs', 'status', 'psql', 'reset', 'restart', 'shell')]
+    [ValidateSet('console', 'import', 'logs', 'status', 'psql', 'reset', 'restart', 'shell', 'seed-scim')]
     [string]$Command = 'status'
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\env.ps1"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $ProjectRoot
 
@@ -25,17 +27,18 @@ try {
     switch ($Command) {
 
         'console' {
-            Write-Host "IdentityIQ-Konsole - 'quit' zum Beenden" -ForegroundColor Cyan
+            Write-Host "IdentityIQ console - 'quit' to exit" -ForegroundColor Cyan
             docker compose exec iiq iiq console
         }
 
         'import' {
-            Write-Host "Importiere data\objects neu ..." -ForegroundColor Cyan
-            # Der Init-Container erkennt am Datenbankzustand, dass die
-            # Basiskonfiguration schon da ist, und spielt nur die
-            # eigenen Objekte erneut ein.
-            docker compose up iiq-init
-            Write-Host "Fertig." -ForegroundColor Green
+            Write-Host "Re-importing data\objects ..." -ForegroundColor Cyan
+            # The init container detects from the database state that the
+            # base configuration is already present and only re-imports
+            # the custom objects. Note: import never deletes - an object
+            # removed or renamed in the files stays in the database.
+            Invoke-Compose up iiq-init
+            Write-Host "Done." -ForegroundColor Green
         }
 
         'logs' {
@@ -45,11 +48,8 @@ try {
         'status' {
             docker compose ps
             Write-Host ""
-            Write-Host "Erreichbar unter:" -ForegroundColor White
-            Write-Host "  IdentityIQ   http://localhost:8080/identityiq   (spadmin / admin)"
-            Write-Host "  Mailpit      http://localhost:8025"
-            Write-Host "  DBGate       http://localhost:5050"
-            Write-Host "  LDAP-UI      http://localhost:5080"
+            Write-Host "Available at:" -ForegroundColor White
+            Write-Endpoints
         }
 
         'psql' {
@@ -61,23 +61,31 @@ try {
         }
 
         'restart' {
-            docker compose restart iiq
-            Write-Host "IdentityIQ neu gestartet." -ForegroundColor Green
+            Invoke-Compose restart iiq
+            Write-Host "IdentityIQ restarted." -ForegroundColor Green
+        }
+
+        'seed-scim' {
+            # The SCIM server keeps its data inside the container; a
+            # `down` wipes it. This re-creates the seed accounts from the
+            # generated data set (idempotent by externalId).
+            python "$PSScriptRoot\seed-scim.py"
+            if ($LASTEXITCODE -ne 0) { throw "seed-scim failed" }
         }
 
         'reset' {
             Write-Host ""
-            Write-Host "  ACHTUNG" -ForegroundColor Red
-            Write-Host "  Dies loescht die Datenbank und alle in IdentityIQ" -ForegroundColor Yellow
-            Write-Host "  angelegten Objekte unwiderruflich." -ForegroundColor Yellow
+            Write-Host "  WARNING" -ForegroundColor Red
+            Write-Host "  This irreversibly deletes the database and all objects" -ForegroundColor Yellow
+            Write-Host "  created in IdentityIQ." -ForegroundColor Yellow
             Write-Host ""
-            $answer = Read-Host "  Zum Bestaetigen 'ja' eingeben"
-            if ($answer -ne 'ja') {
-                Write-Host "  Abgebrochen." -ForegroundColor Gray
+            $answer = Read-Host "  Type 'yes' to confirm"
+            if ($answer -ne 'yes') {
+                Write-Host "  Aborted." -ForegroundColor Gray
                 return
             }
-            docker compose down -v
-            Write-Host "Zuruecksetzen abgeschlossen. Neu starten mit: docker compose up -d" -ForegroundColor Green
+            Invoke-Compose down -v
+            Write-Host "Reset complete. Start again with: docker compose up -d" -ForegroundColor Green
         }
     }
 } finally {

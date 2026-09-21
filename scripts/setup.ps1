@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Einmaliges Einrichten der IdentityIQ-Docker-Umgebung.
+    One-time setup of the IdentityIQ Docker environment.
 
 .DESCRIPTION
-    Prueft die Voraussetzungen, legt die .env an und startet optional
-    den ersten Build.
+    Checks prerequisites, creates .env and optionally runs the first
+    build.
 
 .EXAMPLE
     .\scripts\setup.ps1
@@ -17,6 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\env.ps1"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 function Write-Step  { param($m) Write-Host "`n=== $m ===" -ForegroundColor Cyan }
@@ -24,15 +25,15 @@ function Write-Ok    { param($m) Write-Host "  [ok] $m"    -ForegroundColor Gree
 function Write-Warn2 { param($m) Write-Host "  [!]  $m"    -ForegroundColor Yellow }
 function Write-Err2  { param($m) Write-Host "  [xx] $m"    -ForegroundColor Red }
 
-Write-Step "Voraussetzungen pruefen"
+Write-Step "Checking prerequisites"
 
 # --- Docker ---------------------------------------------------------------
 try {
     $dockerVersion = (docker version --format '{{.Server.Version}}' 2>$null)
-    if (-not $dockerVersion) { throw "keine Antwort" }
+    if (-not $dockerVersion) { throw "no response" }
     Write-Ok "Docker Engine $dockerVersion"
 } catch {
-    Write-Err2 "Docker ist nicht erreichbar. Laeuft Docker Desktop?"
+    Write-Err2 "Docker is not reachable. Is Docker Desktop running?"
     exit 1
 }
 
@@ -41,35 +42,35 @@ try {
     $composeVersion = (docker compose version --short 2>$null)
     Write-Ok "Docker Compose $composeVersion"
 } catch {
-    Write-Err2 "'docker compose' steht nicht zur Verfuegung."
+    Write-Err2 "'docker compose' is not available."
     exit 1
 }
 
-# --- Arbeitsspeicher ------------------------------------------------------
+# --- Memory ---------------------------------------------------------------
 $memBytes = [int64](docker info --format '{{.MemTotal}}' 2>$null)
 $memGB = [math]::Round($memBytes / 1GB, 1)
 if ($memGB -lt 8) {
-    Write-Warn2 "Docker stehen nur $memGB GB RAM zur Verfuegung. Empfohlen sind mindestens 8 GB."
-    Write-Warn2 "Einstellbar unter: Docker Desktop > Settings > Resources"
+    Write-Warn2 "Docker has only $memGB GB RAM available. At least 8 GB recommended."
+    Write-Warn2 "Adjust under: Docker Desktop > Settings > Resources"
 } else {
-    Write-Ok "Arbeitsspeicher fuer Docker: $memGB GB"
+    Write-Ok "Memory available to Docker: $memGB GB"
 }
 
-# --- Installationspaket ---------------------------------------------------
-Write-Step "Installationspaket pruefen"
+# --- Installation package -------------------------------------------------
+Write-Step "Checking installation package"
 
 $installerDir = Join-Path $ProjectRoot 'installer'
 $package = Get-ChildItem -Path $installerDir -Filter '*.zip' -ErrorAction SilentlyContinue |
            Select-Object -First 1
 
 if (-not $package) {
-    Write-Err2 "Kein Installationspaket in installer\ gefunden."
+    Write-Err2 "No installation package found in installer\."
     Write-Host ""
-    Write-Host "  Bitte das SailPoint-Paket dorthin kopieren, zum Beispiel:" -ForegroundColor Yellow
+    Write-Host "  Copy the SailPoint package there, e.g.:" -ForegroundColor Yellow
     Write-Host "      installer\SailPoint_identityiq-8.5_Software_Package.zip" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  Das Paket wird bewusst NICHT eingecheckt (siehe .gitignore)," -ForegroundColor Gray
-    Write-Host "  da es lizenzpflichtige Software enthaelt." -ForegroundColor Gray
+    Write-Host "  The package is deliberately NOT checked in (see .gitignore):" -ForegroundColor Gray
+    Write-Host "  it contains licensed software." -ForegroundColor Gray
     exit 1
 }
 
@@ -77,86 +78,77 @@ $sizeMB = [math]::Round($package.Length / 1MB, 0)
 Write-Ok "$($package.Name) ($sizeMB MB)"
 
 # --- .env -----------------------------------------------------------------
-Write-Step "Konfiguration"
+Write-Step "Configuration"
 
 $envFile     = Join-Path $ProjectRoot '.env'
 $envExample  = Join-Path $ProjectRoot '.env.example'
 
 if (Test-Path $envFile) {
-    Write-Ok ".env ist bereits vorhanden (bleibt unveraendert)"
+    Write-Ok ".env already exists (left unchanged)"
 } else {
     Copy-Item $envExample $envFile
-    Write-Ok ".env aus .env.example erzeugt"
-    Write-Warn2 "Die Standardpasswoerter sind nur fuer lokale Entwicklung gedacht."
+    Write-Ok ".env created from .env.example"
+    Write-Warn2 "The default passwords are for local development only."
 }
 
-# --- Ports pruefen --------------------------------------------------------
-Write-Step "Ports pruefen"
+# --- Ports ----------------------------------------------------------------
+Write-Step "Checking ports"
 
-$ports = @{
-    'IdentityIQ' = 8080
-    'PostgreSQL' = 5432
-    'Mailpit'    = 8025
-    'DBGate'     = 5050
-    'LDAP-UI'    = 5080
-    'OpenLDAP'   = 1389
-}
+# From .env with compose defaults - see scripts/env.ps1.
+$ports = Get-PublishedPorts
 
 $conflict = $false
 foreach ($entry in $ports.GetEnumerator()) {
     $inUse = Get-NetTCPConnection -LocalPort $entry.Value -State Listen -ErrorAction SilentlyContinue
     if ($inUse) {
-        Write-Warn2 "Port $($entry.Value) ($($entry.Key)) ist bereits belegt - ggf. in .env aendern"
+        Write-Warn2 "Port $($entry.Value) ($($entry.Key)) is already in use - change it in .env if needed"
         $conflict = $true
     }
 }
-if (-not $conflict) { Write-Ok "Alle benoetigten Ports sind frei" }
+if (-not $conflict) { Write-Ok "All required ports are free" }
 
 # --- Build ----------------------------------------------------------------
 if ($Build -or $Start) {
-    Write-Step "Images bauen"
-    Write-Host "  Der erste Build dauert einige Minuten:" -ForegroundColor Gray
-    Write-Host "  das WAR entpackt sich auf rund 1 GB in ueber 8.900 Dateien." -ForegroundColor Gray
+    Write-Step "Building images"
+    Write-Host "  The first build takes several minutes:" -ForegroundColor Gray
+    Write-Host "  the WAR unpacks to about 1 GB in over 8,900 files." -ForegroundColor Gray
     Push-Location $ProjectRoot
     try {
         docker compose build
-        if ($LASTEXITCODE -ne 0) { throw "Build fehlgeschlagen" }
-        Write-Ok "Images gebaut"
+        if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+        Write-Ok "Images built"
     } finally {
         Pop-Location
     }
 }
 
 if ($Start) {
-    Write-Step "Umgebung starten"
+    Write-Step "Starting environment"
     Push-Location $ProjectRoot
     try {
         docker compose up -d
-        if ($LASTEXITCODE -ne 0) { throw "Start fehlgeschlagen" }
+        if ($LASTEXITCODE -ne 0) { throw "Start failed" }
     } finally {
         Pop-Location
     }
-    Write-Ok "Container gestartet"
+    Write-Ok "Containers started"
 }
 
-# --- Abschluss ------------------------------------------------------------
-Write-Step "Fertig"
+# --- Summary --------------------------------------------------------------
+Write-Step "Done"
 
 if (-not $Start) {
     Write-Host ""
-    Write-Host "  Naechster Schritt:" -ForegroundColor White
+    Write-Host "  Next step:" -ForegroundColor White
     Write-Host "      docker compose up -d" -ForegroundColor Cyan
 }
 
 Write-Host ""
-Write-Host "  Nach dem Start erreichbar:" -ForegroundColor White
-Write-Host "      IdentityIQ   http://localhost:8080/identityiq   (spadmin / admin)"
-Write-Host "      Mailpit      http://localhost:8025"
-Write-Host "      DBGate       http://localhost:5050"
-Write-Host "      LDAP-UI      http://localhost:5080"
+Write-Host "  Available after start:" -ForegroundColor White
+Write-Endpoints -Indent '      '
 Write-Host ""
-Write-Host "  Der erste Start dauert mehrere Minuten - die Datenbank wird" -ForegroundColor Gray
-Write-Host "  angelegt und die Basiskonfiguration importiert." -ForegroundColor Gray
-Write-Host "  Fortschritt verfolgen mit:" -ForegroundColor Gray
+Write-Host "  The first start takes several minutes - the database is" -ForegroundColor Gray
+Write-Host "  created and the base configuration imported." -ForegroundColor Gray
+Write-Host "  Follow progress with:" -ForegroundColor Gray
 Write-Host "      docker compose logs -f iiq-init" -ForegroundColor Cyan
 Write-Host ""

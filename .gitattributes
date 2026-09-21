@@ -1,12 +1,12 @@
 # ---------------------------------------------------------------------------
-# WICHTIG: Shell-Skripte MUESSEN LF-Zeilenenden behalten.
+# IMPORTANT: shell scripts MUST keep LF line endings.
 #
-# Der Host ist Windows. Mit core.autocrlf=true wuerde Git beim Auschecken
-# CRLF schreiben. Ein Shell-Skript mit CRLF-Shebang scheitert im Linux-
-# Container mit "bad interpreter: No such file or directory".
+# The host is Windows. With core.autocrlf=true Git would write CRLF on
+# checkout. A shell script with a CRLF shebang fails in the Linux
+# container with "bad interpreter: No such file or directory".
 #
-# Das hat in den Referenzprojekten gefehlt bzw. war unvollstaendig
-# (Projekt B sichert nur *.sh ab, nicht das extension-lose "console").
+# The reference projects lacked this or had it incomplete (project B
+# only covers *.sh, not the extension-less "console").
 # ---------------------------------------------------------------------------
 * text=auto eol=lf
 
@@ -22,12 +22,12 @@ Dockerfile      text eol=lf
 *.sql           text eol=lf
 *.ldif          text eol=lf
 
-# Windows-Skripte behalten CRLF
+# Windows scripts keep CRLF
 *.ps1           text eol=crlf
 *.bat           text eol=crlf
 *.cmd           text eol=crlf
 
-# Binaerdateien nicht anfassen
+# Do not touch binaries
 *.zip           binary
 *.jar           binary
 *.war           binary

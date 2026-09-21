@@ -1,0 +1,68 @@
+[
+  {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User"
+    ],
+    "userName": "daniel.hughes",
+    "externalId": "1031",
+    "name": {
+      "givenName": "Daniel",
+      "familyName": "Hughes",
+      "formatted": "Daniel Hughes"
+    },
+    "displayName": "Daniel Hughes",
+    "emails": [
+      {
+        "value": "daniel.hughes@example.com",
+        "primary": true,
+        "type": "work"
+      }
+    ],
+    "title": "Security Engineer",
+    "active": true
+  },
+  {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User"
+    ],
+    "userName": "irene.evans",
+    "externalId": "1064",
+    "name": {
+      "givenName": "Irene",
+      "familyName": "Evans",
+      "formatted": "Irene Evans"
+    },
+    "displayName": "Irene Evans",
+    "emails": [
+      {
+        "value": "irene.evans@example.com",
+        "primary": true,
+        "type": "work"
+      }
+    ],
+    "title": "Specialist",
+    "active": true
+  },
+  {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User"
+    ],
+    "userName": "frank.fisher",
+    "externalId": "1073",
+    "name": {
+      "givenName": "Frank",
+      "familyName": "Fisher",
+      "formatted": "Frank Fisher"
+    },
+    "displayName": "Frank Fisher",
+    "emails": [
+      {
+        "value": "frank.fisher@example.com",
+        "primary": true,
+        "type": "work"
+      }
+    ],
+    "title": "Department Head",
+    "active": true
+  }
+]

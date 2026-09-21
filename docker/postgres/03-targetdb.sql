@@ -1,16 +1,15 @@
 -- ===========================================================================
--- Zielsystem-Datenbank fuer den JDBC-Connector
+-- Target-system database for the JDBC connector
 -- ===========================================================================
--- Eine vierte Datenbank im selben Postgres-Container. Bewusst kein eigener
--- Container: der JDBC-Treiber liegt bereits im IIQ-Image (er wird fuer IIQ
--- selbst gebraucht), und ein zweites Datenbanksystem haette hier keinen
--- Erkenntniswert.
+-- A fourth database in the same Postgres container. Deliberately no
+-- separate container: the JDBC driver is already in the IIQ image (IIQ
+-- itself needs it), and a second DBMS would add nothing here.
 --
--- Die Tabelle folgt dem Muster einer typischen Zielsystem-Tabelle, wie sie
--- ein JDBC-Connector anspricht: eine flache Struktur mit einem eindeutigen
--- Schluessel, den IIQ als identityAttribute verwendet.
+-- The table follows the pattern of a typical target-system table as
+-- addressed by a JDBC connector: a flat structure with a unique key that
+-- IIQ uses as identityAttribute.
 --
--- Laeuft als initdb-Hook nach der IIQ-Schema-DDL (Praefix 03).
+-- Runs as an initdb hook after the IIQ schema DDL (prefix 03).
 -- ===========================================================================
 
 CREATE USER targetapp WITH ENCRYPTED PASSWORD 'targetapp';
@@ -18,22 +17,26 @@ CREATE DATABASE targetdb OWNER targetapp;
 
 \connect targetdb
 
--- Eigenes Schema statt public - konsistent mit den IIQ-Datenbanken.
+-- Own schema instead of public - consistent with the IIQ databases.
 CREATE SCHEMA targetapp AUTHORIZATION targetapp;
 
 SET search_path TO targetapp, public;
 
 -- ---------------------------------------------------------------------------
--- Die Account-Tabelle
+-- The account table
 --
--- IIQID ist der Korrelationsschluessel und entspricht der employeeNumber
--- aus der HR-Quelle. Er ist als identityAttribute in der Application
--- hinterlegt - der Wert, ueber den IIQ einen Account wiedererkennt.
+-- IIQID is the correlation key and equals the employeeNumber from the HR
+-- source. It is configured as identityAttribute in the Application - the
+-- value by which IIQ recognizes an account.
 --
--- Die Spaltennamen sind bewusst gemischt geschrieben (IIQID, FirstName),
--- wie es in gewachsenen Zielsystemen ueblich ist. In PostgreSQL erzwingt
--- das Anfuehrungszeichen bei jedem Zugriff - ein realistischer
--- Stolperstein, den die Provisioning-Rules korrekt behandeln muessen.
+-- Column names are deliberately mixed-case (IIQID, FirstName), as is
+-- common in grown target systems. In PostgreSQL this forces quoting on
+-- every access - a realistic pitfall the provisioning rules must handle
+-- correctly.
+--
+-- Status values 'aktiv'/'inaktiv' are a data contract with
+-- data/objects/26-Rules-JDBC.xml and 27-Application-JDBC.xml - do not
+-- rename.
 -- ---------------------------------------------------------------------------
 CREATE TABLE targetapp."IIQData" (
     "ID"             SERIAL PRIMARY KEY,
@@ -55,10 +58,10 @@ CREATE TABLE targetapp."IIQData" (
 );
 
 -- ---------------------------------------------------------------------------
--- Berechtigungstabelle
+-- Entitlement tables
 --
--- Das Zielsystem kennt Rollen, die einem Account zugewiesen werden.
--- Sie werden in IIQ zu Entitlements.
+-- The target system has roles that are assigned to an account. They
+-- become entitlements in IIQ.
 -- ---------------------------------------------------------------------------
 CREATE TABLE targetapp."IIQRoles" (
     "ID"          SERIAL PRIMARY KEY,
@@ -73,48 +76,29 @@ CREATE TABLE targetapp."IIQAccountRoles" (
 );
 
 -- ---------------------------------------------------------------------------
--- Testdaten: ein paar Rollen, aber nur wenige Accounts.
---
--- Wie beim LDAP ist dies ein ZIELSYSTEM - die Accounts legt IIQ an.
--- Die wenigen vorhandenen dienen dem Korrelationsfall.
+-- Role catalog. Static, like the LDAP groups: these are the entitlements
+-- IIQ can assign. Accounts are seeded separately (04-targetdb-seed.sql).
 -- ---------------------------------------------------------------------------
 INSERT INTO targetapp."IIQRoles" ("RoleName", "Description") VALUES
-    ('TARGET_READ',      'Lesezugriff auf die Anwendung'),
-    ('TARGET_WRITE',     'Schreibzugriff auf die Anwendung'),
-    ('TARGET_APPROVE',   'Freigabeberechtigung'),
-    ('TARGET_REPORT',    'Auswertungen und Berichte'),
-    ('TARGET_ADMIN',     'Administration der Anwendung'),
-    ('TARGET_AUDIT',     'Einsicht in das Protokoll');
+    ('TARGET_READ',      'Read access to the application'),
+    ('TARGET_WRITE',     'Write access to the application'),
+    ('TARGET_APPROVE',   'Approval permission'),
+    ('TARGET_REPORT',    'Reports and analytics'),
+    ('TARGET_ADMIN',     'Application administration'),
+    ('TARGET_AUDIT',     'Audit log access');
 
--- Drei Bestandsaccounts. Die IIQID entspricht der employeeNumber von
--- Personen, die auch in der HR-CSV stehen - die Korrelation greift also.
-INSERT INTO targetapp."IIQData"
-    ("IIQID", "Account", "FirstName", "LastName", "Name", "Email",
-     "Position", "Department", "Costcenter", "Location", "EmploymentType", "Status")
-VALUES
-    ('1001', 'udavis',  'Ursula', 'Davis',   'Ursula Davis',
-     'ursula.davis@example.com',  'Director',    'Sales', 'CC-1000', 'London', 'employee', 'aktiv'),
-    ('1030', 'vrussell','Vincent','Russell', 'Vincent Russell',
-     'vincent.russell@example.com','Solution Architect','IT','CC-2000','London','employee','aktiv'),
-    ('1070', 'sturner', 'Sandra', 'Turner',  'Sandra Turner',
-     'sandra.turner@example.com', 'Analyst',     'Finance','CC-4000','London','employee','aktiv');
+-- Seed accounts and their role assignments are GENERATED into
+-- 04-targetdb-seed.sql by scripts/generate-testdata.py, from the same
+-- person list as the HR CSV and the LDAP seeds. Keeping them here by
+-- hand let them drift (1030 was "Vincent Russell" here and
+-- "Daniel Morgan" in the CSV).
 
-INSERT INTO targetapp."IIQAccountRoles" ("IIQID", "RoleName") VALUES
-    ('1001', 'TARGET_READ'),
-    ('1001', 'TARGET_APPROVE'),
-    ('1001', 'TARGET_REPORT'),
-    ('1030', 'TARGET_READ'),
-    ('1030', 'TARGET_WRITE'),
-    ('1030', 'TARGET_ADMIN'),
-    ('1070', 'TARGET_READ'),
-    ('1070', 'TARGET_REPORT');
-
--- Rechte fuer den Anwendungsbenutzer.
+-- Privileges for the application user.
 GRANT ALL PRIVILEGES ON SCHEMA targetapp TO targetapp;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA targetapp TO targetapp;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA targetapp TO targetapp;
 
--- Suchpfad dauerhaft setzen, damit Abfragen ohne Schema-Praefix
--- funktionieren - dieselbe Ueberlegung wie in 02-search-path.sql.
+-- Persist the search path so queries work without a schema prefix -
+-- same reasoning as in 02-search-path.sql.
 ALTER ROLE targetapp IN DATABASE targetdb SET search_path TO targetapp, public;
 ALTER ROLE postgres  IN DATABASE targetdb SET search_path TO targetapp, public;

@@ -1,786 +1,530 @@
 # CLAUDE.md
 
-Arbeitswissen zu diesem Repository. Enthält die technischen Fakten, die beim Aufbau
-verifiziert wurden, und die Begründungen für die getroffenen Entscheidungen.
+Working knowledge for this repository: verified platform facts, the reasoning behind
+design decisions, and every pitfall that cost time — each with the measurement that
+exposed it. Written for senior developers. If a claim here conflicts with the running
+instance, the instance wins; update this file.
 
-## Was dieses Repository ist
+## What this is
 
-Eine lokale Docker-Entwicklungsumgebung für **SailPoint IdentityIQ 8.5** auf
-**Tomcat 9 / OpenJDK 21 / PostgreSQL 17**.
+A local Docker development environment for **SailPoint IdentityIQ 8.5** on
+**Tomcat 9 / OpenJDK 21 / PostgreSQL 17**, with a complete miniature system landscape:
+an authoritative HR source and four provisioning targets (LDAP, JDBC, SCIM 2.0,
+generic REST), plus joiner/leaver lifecycle driven by dates in the HR feed.
 
-Das Installationspaket ist lizenzpflichtig und liegt **nicht** im Repository. Es muss
-manuell nach `installer/` gelegt werden.
+The IIQ installation package is licensed and **not** in the repository. Drop it into
+`installer/`.
 
-## Verifizierte Fakten — nicht raten, hier nachsehen
+## Working rules
 
-Alle Angaben wurden direkt am Installationspaket geprüft. Die maßgebliche Quelle ist der
-**mitgelieferte Installation Guide** (`doc/8.5_IdentityIQ_Installation_Guide.pdf` im ZIP) —
-nicht Web-Recherche. Im Web ist die SailPoint-Dokumentation hinter Login.
+- **Commits carry no AI attribution.** Author is Michael Langer. No `Co-Authored-By`,
+  no "Generated with".
+- **Language:** English everywhere in the repo — docs, comments, script output, commit
+  messages. Conversation with the maintainer is German.
+- **Verify against the instance, not against memory or web examples.** The IIQ docs are
+  login-gated; most public XML samples target older releases. Sources of truth, in
+  order: the Installation Guide inside the ZIP, the runtime DTD (`dtd /tmp/sp.dtd` in
+  the console), reflection against the running JVM, the shipped templates under
+  `WEB-INF/config/connector/`.
+- **Changing `.env` DB credentials requires a rebuild** — they are baked into the DDL
+  and `iiq.properties`:
+  ```
+  docker compose build && docker compose down -v && docker compose up -d
+  ```
+- **Custom IIQ objects go to `data/objects/`.** Numeric prefix controls import order
+  (`import_folder()` sorts with `LC_ALL=C`); references must point backwards. Every file
+  is re-imported on every init run. **Import never deletes:** an object removed or
+  renamed in the files stays in the database until you `delete <Class> "<name>"` in the
+  console or reset the volume.
+- **Ports and credentials on the host side come from `scripts/env.sh` / `env.ps1`**
+  (`.env` with the compose defaults). Do not hard-code a port or URL in a script again;
+  that is how SCIM and the mock API went missing from four copies of the endpoint list.
+- **After `docker compose down`, re-seed SCIM:** `python scripts/seed-scim.py` (or
+  `.\scripts\iiq.ps1 seed-scim`). The SCIM server keeps its data in the container
+  layer; Postgres, LDAP and the mock re-seed themselves from initdb hooks, LDIFs and the
+  live CSV.
+- **Generated artifacts are committed but never hand-edited:** `data/hr/HR-people.csv`,
+  `docker/openldap/ldif/02-users.ldif`, `03-groups.ldif`,
+  `docker/postgres/04-targetdb-seed.sql`, `data/seed/scim-users.json`. Change the
+  generator. One person list feeds every target; the first three LDAP seed people also
+  exist in JDBC and SCIM.
+- **Before editing a shell script on Windows:** `git ls-files --eol scripts/` must show
+  `i/lf w/lf`. A literal CR byte anywhere flips the file to binary and disables
+  `eol=lf` normalization (happened to `verify.sh`; seven CR bytes inside `tr -d`).
 
-### Plattform
+## Verified platform facts
 
-| Thema | Fakt | Beleg |
+Source: `doc/8.5_IdentityIQ_Installation_Guide.pdf` inside the package, plus direct
+inspection of the WAR.
+
+| Topic | Fact | Evidence |
 |---|---|---|
-| Java | **OpenJDK 21 und 17 unterstützt** | Guide S.3: „OpenJDK 21 and 17 is now supported on all environments" |
-| App-Server | **Nur Tomcat 9.0** | Guide S.2, Abschnitt „Application Servers" |
-| Datenbank | **PostgreSQL 17 und 16**, MySQL 8.4/8.0, MSSQL 2022/2019, Oracle 19c | Guide S.3 |
-| MariaDB | **Nicht unterstützt** — taucht in der Liste nicht auf | Guide S.3 |
-| Login | `spadmin` / `admin` | Guide S.17 |
+| Java | OpenJDK 21 and 17 supported | Guide p.3 |
+| App server | **Tomcat 9.0 only** | Guide p.2 |
+| Database | PostgreSQL 17/16, MySQL 8.4/8.0, MSSQL 2022/2019, Oracle 19c | Guide p.3 |
+| MariaDB | not supported (absent from the list) | Guide p.3 |
+| Default login | `spadmin` / `admin` | Guide p.17 |
+| Bytecode | Java 11 (major 55) — runs on 21 | `identityiq.jar` |
 
-### Warum Tomcat 9 zwingend ist
+**Tomcat 9 is non-negotiable.** IIQ 8.5 is `javax.servlet` (`web.xml` version 2.5,
+`javax.faces-2.2.20.jar`, Spring 5.3.39, Hibernate 5.5.9). Tomcat 10/11 use the
+`jakarta.*` namespace. Tomcat 9.0.x is maintained until 2027-03-31, then a 9.1.x line
+until 2030.
 
-IIQ 8.5 ist **javax.servlet**-basiert, nicht jakarta:
+**JDK 17+ module flags:** `WEB-INF/bin/iiq` adds `--add-opens`/`--add-exports` itself;
+**Tomcat inherits none of that.** They must be in `CATALINA_OPTS`. Minimum per Guide
+p.6: `--add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED`.
 
-- `WEB-INF/web.xml`: `<web-app version="2.5" xmlns="http://java.sun.com/xml/ns/javaee">`
-- `javax.faces-2.2.20.jar`, Spring 5.3.39, Hibernate 5.5.9
+### PostgreSQL
 
-Tomcat 10 und 11 verwenden den `jakarta.*`-Namensraum. Das WAR würde dort nicht starten.
-**Ein Upgrade auf Tomcat 10/11 ist keine Option, solange IIQ javax nutzt.**
+1. **No JDBC driver shipped** (Guide p.21). The WAR contains only
+   `mysql-connector-j-8.4.0.jar`. The Dockerfile downloads `PG_JDBC_VERSION` (42.7.5).
+2. **Quartz delegate is mandatory**, otherwise the scheduler fails:
+   `scheduler.quartzProperties.org.quartz.jobStore.driverDelegateClass=org.quartz.impl.jdbcjobstore.PostgreSQLDelegate`
+3. **The DDL is a psql script, not plain SQL.** `create_identityiq_tables-8.5.postgresql`
+   (9,146 lines) contains nine `\connect` meta-commands and itself creates three
+   databases (`identityiq`, `identityiqah`, `identityiqPlugin`) and three roles with
+   passwords. Consequences: run it through psql (the initdb hook), never set
+   `POSTGRES_DB`, and `sed` the `CREATE USER … ENCRYPTED PASSWORD` lines at image build.
+4. Hibernate dialect: `sailpoint.persistence.PostgreSQL10Dialect` (in `identityiq.jar`).
+5. Case-insensitivity comes from 244 functional indexes on `upper(...)` — no special
+   collation.
+6. **The plugin database has 0 tables by design.** Plugins create their own.
+7. **Tables live in a schema named like the database, not in `public`.** IIQ gets away
+   with it because `"$user"` resolves to the same name as the schema. Every other
+   client (`psql` as `postgres`, DBGate, ad-hoc SQL) needs the prefix or the
+   `search_path` that `docker/postgres/02-search-path.sql` sets per role and database.
+   `verify.sh` uses explicit prefixes so it does not depend on that hook having run on
+   the current volume.
+8. `include_dir` **cannot** be passed as `postgres -c include_dir=…` (`FATAL: unrecognized
+   configuration parameter`). Tuning is appended to `postgresql.conf` by the initdb hook
+   `00-apply-tuning.sh`. No `pg_ctl reload` there: `max_connections`/`shared_buffers`
+   need a restart and the reload would log "configuration file contains errors" — the
+   entrypoint restarts anyway.
 
-Tomcat 9.0.x wird bis 31.03.2027 gepflegt, danach folgt ein 9.1.x-Zweig bis 2030 — also
-keine Sackgasse.
-
-### Java 21: Bytecode und Modulschutz
-
-Der Bytecode ist auf **Java 11** kompiliert (Major-Version 55) und läuft abwärtskompatibel
-auf 21.
-
-**Fallstrick:** Das Startskript `WEB-INF/bin/iiq` erkennt Java ≥ 17 selbst und ergänzt
-`--add-opens`/`--add-exports`. **Tomcat erbt davon nichts.** Diese Flags müssen deshalb
-separat in `CATALINA_OPTS` stehen (siehe `docker-compose.yml`). Laut Guide S.6 ist für
-JDK 17+ mindestens erforderlich:
-
-```
---add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
-```
-
-### PostgreSQL — die drei Stolpersteine
-
-**1. Der JDBC-Treiber fehlt.** Guide S.21: „The JDBC driver for PostgreSQL is not provided
-with IdentityIQ." Im WAR liegt nur `mysql-connector-j-8.4.0.jar`. Der Treiber wird im
-Dockerfile nachgeladen (`PG_JDBC_VERSION`, aktuell 42.7.5).
-
-**2. Der Quartz-Delegate muss gesetzt werden.** Ohne ihn schlägt der Scheduler fehl:
-
-```properties
-scheduler.quartzProperties.org.quartz.jobStore.driverDelegateClass=org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
-```
-
-**3. Die DDL ist ein psql-Skript, kein reines SQL.** `create_identityiq_tables-8.5.postgresql`
-(9.146 Zeilen) enthält 9 `\connect`-Meta-Kommandos und legt **selbst** an:
-
-- 3 Datenbanken: `identityiq`, `identityiqah`, `identityiqPlugin`
-- 3 Rollen mit Passwörtern (`CREATE USER ... ENCRYPTED PASSWORD`)
-
-Daraus folgt:
-- Sie muss von **psql** ausgeführt werden, nicht über einen JDBC-Treiber.
-- `POSTGRES_DB` darf im Container **nicht** gesetzt werden, sonst kollidiert es.
-- Die Passwörter werden beim Image-Build per `sed` durch die `.env`-Werte ersetzt.
-
-Der Hibernate-Dialekt ist `sailpoint.persistence.PostgreSQL10Dialect` (die Klasse liegt im
-`identityiq.jar`).
-
-**Case-Insensitivity** wird über 244 Funktionsindizes auf `upper(...)` gelöst — es ist also
-**keine** spezielle Collation nötig.
-
-**Die Plugin-Datenbank hat absichtlich 0 Tabellen.** Sie enthält nur Schema und Rechte;
-die Tabellen legt jedes Plugin bei seiner Installation selbst an. Das ist kein Fehler.
-
-**Die Tabellen liegen nicht in `public`.** Die DDL legt sie in ein gleichnamiges Schema
-(`identityiq` bzw. `identityiqah`). Der PostgreSQL-Default für `search_path` ist aber
-`"$user", public`.
-
-Für IIQ selbst geht das gerade noch gut, weil sich `"$user"` zum Benutzernamen auflöst und
-dieser zufällig genauso heißt wie das Schema. Für alle anderen Zugriffe — DBGate, `psql`
-als `postgres`, eigene Auswertungen — ist das Schema dagegen nicht im Suchpfad:
-
-```sql
-SELECT * FROM spt_identity;             -- relation "spt_identity" does not exist
-SELECT * FROM identityiq.spt_identity;  -- funktioniert
-```
-
-Deshalb setzt `docker/postgres/02-search-path.sql` den Suchpfad dauerhaft pro Rolle und
-Datenbank (`ALTER ROLE ... IN DATABASE ... SET search_path`). Danach funktionieren
-Abfragen ohne Schema-Präfix.
-
-DBGate wählt das Schema von sich aus richtig und zeigt direkt alle 220 Tabellen.
-
-### Größenverhältnisse
+### Sizes
 
 | | |
 |---|---|
 | ZIP | 770 MB |
 | `identityiq.war` | 742 MB |
-| entpackt | ~1 GB in **8.984 Dateien** |
-| davon `WEB-INF/lib-connectors` | 562 MB (15 Bundles) |
-
-Deshalb: Multi-Stage-Build, `.dockerignore` mit Whitelist, und das WAR wird nach dem
-Entpacken gelöscht.
-
-## Architektur und Begründungen
-
-### Warum ein eigener Init-Container
-
-`iiq-init` läuft einmal durch und beendet sich; `iiq` startet erst danach
-(`depends_on: condition: service_completed_successfully`).
-
-Das trennt „einmalig initialisieren" sauber von „Server läuft" und bleibt korrekt, falls
-später mehrere IIQ-Knoten laufen sollen — dann importiert nicht jeder Knoten parallel.
-
-### Warum Idempotenz über die Datenbank statt über eine Markerdatei
-
-`entrypoint.sh` prüft mit `get Identity spadmin` in der IIQ-Konsole, ob bereits
-initialisiert wurde.
-
-Referenzprojekt A nutzt stattdessen eine Markerdatei im Tomcat-Verzeichnis — das
-funktioniert nur, weil dort das komplette Tomcat-Verzeichnis als Volume gemountet ist, was
-wiederum dazu führt, dass ein Image-Rebuild wirkungslos bleibt. Der Datenbankzustand ist
-die ehrlichere Quelle: er überlebt Rebuilds, Container-Neustarts und Volume-Wechsel.
-
-### Warum Passwörter im Klartext (Vorgabe, bewusst)
-
-`iiq encrypt` wird **nicht** standardmäßig verwendet. Grund: Verschlüsselte Werte sind an
-den Keystore (`WEB-INF/classes/iiq.dat` + `iiq.cfg`) gebunden. Liegt der Keystore im Image,
-ist damit nichts gewonnen — genau diesen Fehler macht Referenzprojekt D, das den Keystore
-sogar ins Git-Repository eingecheckt hat und damit alle verschlüsselten Werte
-entschlüsselbar macht.
-
-Für diese lokale Dev-Umgebung sind Klartext-Passwörter aus `.env` ehrlicher und
-nachvollziehbarer. Für produktionsnahe Setups wäre `iiq encrypt` mit einem **extern
-gemounteten** Keystore der richtige Weg.
-
-### Warum `ImportAction name='merge'` statt sed
-
-Die Mail-Konfiguration (`data/objects/10-Configuration-Mail.xml`) ändert nur einzelne
-Schlüssel der `SystemConfiguration`. Referenzprojekt A patcht stattdessen die `init.xml`
-per `sed` — das ist destruktiv und überlebt kein Upgrade.
-
-### Warum die Testdaten generiert und nicht gepflegt werden
-
-`scripts/generate-testdata.py` erzeugt aus **einer** Personenliste drei Dateien:
-`data/hr/HR-people.csv`, `02-users.ldif` und `03-groups.ldif`. Sie sind **Artefakte** —
-sie liegen im Git, weil die Container sie beim Start brauchen, aber geändert wird der
-Generator.
-
-Eine gemeinsame Quelle ist hier mehr als Bequemlichkeit: Die `employeeNumber` der
-LDAP-Seed-Accounts **muss** zu einer Zeile der CSV passen, sonst korreliert nichts.
-Zwei getrennt gepflegte Dateien wären nach der ersten Änderung auseinandergelaufen.
-
-Drei der vier Referenzprojekte setzen phpLDAPadmin ein und legen Testdaten von Hand über
-die Oberfläche an. Das skaliert nicht: Bei 100 Personen wäre weder die Verteilung
-nachvollziehbar noch eine Änderung der Datenmenge praktikabel.
-
-Ein fester Zufallsstartwert (`SEED`) macht die Erzeugung reproduzierbar — derselbe Aufruf
-liefert dieselben Daten. Das ist nötig, damit ein neu aufgebautes Verzeichnis dieselben
-Korrelationsergebnisse liefert wie vorher; sonst wären IIQ-Testläufe nicht vergleichbar.
-
-Bei der Verteilung ging es um Brauchbarkeit, nicht um Größe:
-
-- **Dreistufige Hierarchie** über `manager` (Department Head → Team Lead → Staff). Eine
-  flache Liste hängt alle am selben Knoten, dann lässt sich keine Manager-Zertifizierung
-  testen.
-- **Ungleiche Gruppengrößen** (2 bis 55). Gleichverteilte Gruppen erzeugen bei der
-  Rollenmodellierung nur Rauschen.
-- **Abteilungsgebundene Gruppen** über `GROUP_DEPARTMENT_SCOPE` — Legal bekommt keinen
-  Build-Server-Zugriff.
-- **Privilegierte Gruppen** (`PRIVILEGED_GROUPS`) werden bevorzugt aus Führung und IT
-  besetzt.
-
-Ein Fallstrick beim Schreiben des Generators: Die Einschränkung auf privilegierte
-Kandidaten muss **vor** der Berechnung der Zielgröße greifen. Andernfalls wird erst aus
-allen Kandidaten eine Menge gezogen und danach auf die kleinere Gruppe reduziert — die
-sensiblen Gruppen schrumpfen dann auf ein bis zwei Mitglieder und taugen nicht mehr als
-Testdaten.
-
-Werte mit Sonderzeichen müssen nach RFC 2849 base64-kodiert werden (`cn:: <base64>`).
-`ldif_value()` erledigt das; ohne die Kodierung bricht der Import ab. Bei den jetzigen
-englischen Daten greift das nicht mehr, die Funktion bleibt aber für eigene Ergänzungen.
-
-Die LDIFs werden **nur bei leerem Datenverzeichnis** eingelesen
-(`LDAP_CUSTOM_LDIF_DIR=/ldifs`). Nach einer Änderung muss deshalb das Volume weg:
-
-```
-docker compose rm -sf openldap && docker volume rm iiq85_ldapdata && docker compose up -d openldap
-```
-
-## Bekannte Fallstricke
-
-### CRLF unter Windows
-
-`.gitattributes` erzwingt `eol=lf` für alle Shell-Skripte. Ohne das schreibt Git unter
-Windows CRLF, und der Container scheitert mit
-`bad interpreter: No such file or directory`.
-
-Betroffen sind auch Dateien **ohne** `.sh`-Endung. Referenzprojekt B sichert nur `*.sh` ab
-und hat dadurch genau diese Lücke.
-
-### `include_dir` lässt sich nicht per `-c` setzen
-
-Beim Postgres-Tuning war der erste Ansatz
-`CMD ["postgres", "-c", "include_dir=..."]`. Das scheitert mit
-`FATAL: unrecognized configuration parameter "include_dir"` — der Parameter ist nur
-innerhalb einer Konfigurationsdatei gültig. Gelöst über den initdb-Hook
-`docker/postgres/00-apply-tuning.sh`, der das Tuning an die `postgresql.conf` anhängt.
-
-### `iiq console` beendet sich nicht von allein
-
-Ein `echo "befehl" | iiq console` **hängt**. Die Konsole wertet EOF auf stdin nicht als
-Abbruch, sondern wartet weiter auf Eingaben — der Container läuft dann unbegrenzt weiter
-(beim ersten Testlauf hier: 10 Minuten bei 43 % CPU, ohne jede Ausgabe).
-
-Es muss immer ein explizites `quit` folgen. `entrypoint.sh` hängt es in `iiq_console()`
-automatisch an.
-
-### `iiq console` meldet Fehler nicht über den Exitcode
-
-Ein fehlgeschlagenes Kommando liefert trotzdem **Exitcode 0**; der Stacktrace erscheint
-nur auf stdout. Ohne Auswertung liefe ein misslungener Import unbemerkt durch und der
-Server startete gegen eine halb-initialisierte Datenbank.
-
-Deshalb gibt es `iiq_console_checked()`: Die Ausgabe wird eingesammelt und auf
-`Exception|Caused by:|^Error:` geprüft. Referenzprojekt B hat weder `set -e` noch eine
-solche Auswertung.
-
-### Reihenfolge bei Patches
-
-`import init.xml` muss **vor** `iiq patch` laufen. Umgekehrt schlägt der Patch fehl.
-
-### `exec format error` bei Fremd-Images — `platform` setzen
-
-Mit dem **containerd-Image-Store** (`Storage Driver: overlayfs`,
-`io.containerd.snapshotter.v1`) wählt Docker bei Multi-Arch-Images nicht zuverlässig die
-Host-Architektur, sondern offenbar den **ersten Eintrag im Manifest**. Steht dort
-`linux/386` oder `linux/arm64` vor `linux/amd64`, startet der Container mit
-`exec /<binary>: exec format error`.
-
-Tückisch dabei: `docker image inspect` meldet trotzdem `Architecture: amd64` — die Angabe
-stammt aus den Manifest-Metadaten, nicht aus den tatsächlichen Layern. Auch ein
-`docker pull --platform linux/amd64` half nicht zuverlässig.
-
-Betroffen waren `axllent/mailpit` (386 zuerst) und `dpage/pgadmin4` (arm64 zuerst).
-
-Abhilfe: `platform: linux/amd64` im Service eintragen. Prüfen lässt sich die Reihenfolge
-mit:
-
-```bash
-docker manifest inspect <image> | grep '"architecture"'
-```
-
-Bei pgAdmin half auch das nicht. Als Datenbank-Oberfläche wird deshalb **DBGate**
-verwendet (`amd64` steht dort im Manifest an erster Stelle). Die drei Verbindungen werden
-über `CONNECTIONS` und `LABEL_*`/`SERVER_*`/`USER_*`-Variablen vorkonfiguriert, es muss
-also nichts manuell angelegt werden.
-
-Zwischenzeitlich war Adminer im Einsatz — technisch einwandfrei, optisch aber sehr
-altbacken.
-
-Als LDAP-Browser dient **`dnknth/ldap-ui`** (Vue auf Alpine, `amd64` zuerst im Manifest).
-phpLDAPadmin — in drei der vier Referenzprojekte im Einsatz — ist veraltet und das
-`osixia`-Image seit Jahren ungepflegt. **LLDAP** wäre kein Browser, sondern ein eigener
-LDAP-Server mit Weboberfläche und würde OpenLDAP ersetzen statt ergänzen.
-
-Anmeldung erfolgt über `BIND_PATTERN=cn=%s,<BASE_DN>`, man gibt also nur `admin` ein statt
-des vollständigen DN.
-
-### IIQ-XML: Fallstricke beim Import
-
-Die Objekte in `data/objects/` wurden gegen die **laufende 8.5-Instanz** verifiziert,
-nicht aus Beispielen im Netz übernommen. Vier Dinge sind dabei aufgefallen:
-
-**1. Die maßgebliche DTD wird zur Laufzeit erzeugt.** Sie liegt nirgends als Datei — die
-Klasse `sailpoint.tools.xml.DTDBuilder` baut sie aus den Objektmodellen. Ausgeben lässt
-sie sich in der Konsole:
-
-```
-dtd /tmp/sailpoint.dtd
-```
-
-Bei jeder Unsicherheit über ein Attribut ist das die Quelle, nicht die Erinnerung.
-
-**2. `searchable` gibt es nicht.** In vielen Beispielen steht
-`<ObjectAttribute searchable="true">`. Die 8.5-DTD kennt das Attribut nicht, der Import
-scheitert mit *„Attribute searchable must be declared"*. Das Gegenstück heißt
-**`extendedNumber`** (Spalten `extended1…extendedN`) oder **`namedColumn`** (eigene
-benannte Spalte).
-
-Das ist kein kosmetischer Unterschied: Ohne extendedNumber liegt der Wert nur im XML-Blob
-und **kein Filter findet ihn** — Rollenzuweisung über `Selector` und der
-`managerCorrelationFilter` laufen dann still ins Leere, ohne Fehlermeldung.
-
-**3. `AttributeSource` nimmt kein `AttributeRef`.** Laut DTD:
-
-```
-<!ELEMENT AttributeSource ((ApplicationRef|RuleRef)*)>
-```
-
-Das Quellattribut gehört ins `name`-Attribut: `<AttributeSource name="employeeNumber">`.
-
-**4. Der Task-Typ heißt `Identity`, nicht `IdentityRefresh`.** Die Fehlermeldung listet
-dankenswerterweise alle gültigen Werte auf.
-
-**Bonus — XML-Kommentare:** Doppelbindestriche sind in XML-Kommentaren verboten. Eine
-Trennlinie aus `-----` bricht die Datei. Hier werden `=====` verwendet.
-
-### `run` in der IIQ-Konsole braucht Anführungszeichen
-
-```
-run "LDAP Group Aggregation"      richtig
-run LDAP Group Aggregation        falsch
-```
-
-Ohne Anführungszeichen trennt die Konsole am Leerzeichen und sucht eine Aufgabe namens
-`LDAP` — Ergebnis: *„Ambiguous objects: LDAP Group Aggregation, LDAP Account
-Aggregation"*. Tückisch, weil der Exitcode 0 bleibt und die Aufgabe einfach nicht läuft.
-
-Hinzu kommt: `run` startet die Aufgabe über Quartz und kehrt sofort zurück. Beendet man
-die Konsole gleich danach, fährt sie den Scheduler herunter und bricht die laufende
-Aufgabe ab (*„The Scheduler has been shutdown"*). Für einen Lauf aus dem Skript muss die
-Konsole offen bleiben, bis die Aufgabe fertig ist — in der Oberfläche unter
-**Setup > Tasks** stellt sich die Frage nicht.
-
-### `groupOfNames` verlangt mindestens ein `member`
-
-Laut RFC 4519 ist eine mitgliederlose `groupOfNames` schema-widrig; slapd lehnt sie ab und
-**bricht den gesamten LDIF-Import ab** — im Log steht nur „Loading custom LDIF files…",
-kein Fehler. Symptom: 5 Accounts sind da, aber null Gruppen.
-
-Da das Verzeichnis Zielsystem ist, sind viele Gruppen zunächst leer. Gelöst über den in
-echten Verzeichnissen üblichen Platzhalter: `cn=placeholder,dc=example,dc=com` dient
-leeren Gruppen als einziges `member`. Er liegt bewusst **außerhalb** von `ou=people` und
-fällt damit nicht in den Suchbereich der Account-Aggregation.
-
-Die Alternative `groupOfMembers` (wo `member` optional ist) steht im Bitnami-Image nicht
-zur Verfügung — nur `groupOfNames` und `groupOfUniqueNames`.
-
-### Gruppen-objectClass muss zum Schema passen
-
-Ein Export aus einer anderen 8.5-Instanz nutzte `groupOfUniqueNames` mit
-`groupMemberAttribute="uniqueMember"`. Unser Verzeichnis führt `groupOfNames` mit
-`member`. Übernimmt man das ungeprüft, liefert die Gruppenaggregation **kein Ergebnis** —
-ohne Fehler. Beide Werte müssen zusammenpassen.
-
-### BeanShell: nicht gebundene Argumente sind `void`, nicht `null`
-
-Der teuerste Fehler dieses Aufbaus. Die Regel `HR Set Inactive` prüfte anfangs
-`if (link != null)`. Das schützt **nicht** — es löst den Fehler selbst aus, weil schon
-das Auflösen der undefinierten Variablen scheitert:
-
-```
-bsh.EvalError: Attempt to resolve method: getAttribute() on undefined
-variable or class name: link
-```
-
-Richtig ist die Prüfung auf `void`, mit Normalisierung auf eine lokale Variable:
-
-```java
-Link hrLink = null;
-if (link != void && link != null) {
-    hrLink = link;
-}
-```
-
-Betroffen ist jedes Argument, das je nach Aufrufkontext fehlen kann — `link`, `result`,
-`accountRequest`, `oldValue`. Dieselbe Regel läuft aus mehreren Kontexten: bei der
-Aggregation ist `link` gebunden, beim Identity-Refresh ohne Account nicht.
-
-**Die Folgekosten waren beträchtlich:** Der Fehler trat je Identität auf, die Aggregation
-endete mit `Error`, und statt 102 Identitäten standen **185** in der Datenbank — jede
-gescheiterte Zeile erzeugte eine zusätzliche. Aufräumen ließ sich das nur über
-`sailpoint.api.Terminator`; ein direktes `DELETE FROM spt_identity` scheitert an
-Fremdschlüsseln (`spt_identity_capabilities`).
-
-### Signaturen an der laufenden Instanz prüfen, nicht aus dem Gedächtnis
-
-Das JavaDoc listet für `Link` nur `toString()` — alle Getter sind geerbt und dort nicht
-dokumentiert. Verlässlich ist eine Prüf-Rule mit Reflection:
-
-```
-import /tmp/SigCheck.xml
-rule "ZZ Sig Check"
-```
-
-So verifiziert (IIQ 8.5):
-
-| Aufruf | Befund |
-|---|---|
-| `Link.getAttribute(String)` | existiert, liefert `Object` |
-| `Link.getStringAttribute(...)` | **existiert nicht** — nur `Identity` hat das |
-| `Identity.getStringAttribute(String)` | existiert, kann `null` liefern |
-| `Identity.isInactive()` | existiert |
-| `ProvisioningResult.addError(String)` | existiert, daneben `(Message)` und `(Throwable)` |
-| `STATUS_*` | `queued`, `committed`, `failed`, `retry` |
-| `Schema.getAttributeDefinition(String)` | existiert |
-| `JDBCConnector.buildMapFromResultSet(ResultSet, Schema)` | existiert |
-
-**`source` in der Konsole taugt dafür nicht** — es liest die Datei zeilenweise als
-Konsolenbefehle, nicht als BeanShell. Der Weg führt über eine temporäre Rule.
-
-### IdentityTrigger: `Handler` ist kein Element
-
-Ein Trigger referenziert seinen Workflow über das **Attribut** `handler` plus
-`HandlerParameters` — nicht über ein `<Handler>`-Element. Die DTD erlaubt nur
-`AssignedScope`, `Description`, `Owner`, `HandlerParameters`, `PendingWorkflow`,
-`TriggerRule` und `Selector`.
-
-```xml
-<IdentityTrigger name="HR Leaver" attributeName="inactive"
-                 oldValueFilter="false" newValueFilter="true"
-                 type="AttributeChange"
-                 handler="sailpoint.api.WorkflowTriggerHandler">
-  <HandlerParameters>
-    <Attributes>
-      <Map><entry key="workflow" value="HR Leaver Workflow"/></Map>
-    </Attributes>
-  </HandlerParameters>
-</IdentityTrigger>
-```
-
-Der Typ heißt `Rule` mit großem R; erlaubt sind `Create`, `Delete`, `AttributeChange`,
-`Rule`, `ManagerTransfer`, `NativeChange`, `Alert`, `RapidSetup`.
-
-Die Vorlage liefert die Instanz selbst: `get IdentityTrigger Leaver`.
-
-**Für datumsgesteuerte Eintritte taugt `type="Create"` nicht** — der mitgelieferte Joiner
-nutzt das, aber bei einem künftigen Eintrittsdatum entsteht die Identität lange vor dem
-ersten Arbeitstag. Beide Trigger hier laufen deshalb über den Wechsel von `inactive`.
-
-### Gruppenaggregation: `AccountGroupScan` gibt es nicht mehr
-
-In 8.5 nutzt auch die Gruppenaggregation `sailpoint.task.ResourceIdentityScan`;
-unterschieden wird über `<entry key="aggregationType" value="group"/>`. Die in älteren
-Beispielen genannte Klasse `sailpoint.task.AccountGroupScan` führt zu `Error`, mit dem
-Klassennamen als einziger Meldung.
-
-### `AttributeSource` mit Regel braucht eine `ApplicationRef`
-
-Das Attribut `inactive` sollte über die Regel `HR Set Inactive` aus den Datumsfeldern
-berechnet werden. Zunächst als reine `RuleRef`:
-
-```xml
-<AttributeSource name="Rule: HR Set Inactive">
-  <RuleRef><Reference class="sailpoint.object.Rule" name="HR Set Inactive"/></RuleRef>
-</AttributeSource>
-```
-
-Ergebnis: **kein Fehler, kein Logeintrag — und keine Wirkung.** Der direkte Aufruf der
-Regel lieferte nachweislich `true` für einen Ausgeschiedenen, aber `Identity.inactive`
-blieb `false`. Die Regel wurde beim Refresh schlicht nie aufgerufen.
-
-Richtig ist die anwendungsgebundene Form — dasselbe Muster zeigt ein Export aus einer
-produktiven 8.5-Instanz (`AppRule: …`):
-
-```xml
-<AttributeSource name="AppRule: HR Set Inactive">
-  <ApplicationRef>
-    <Reference class="sailpoint.object.Application" name="HR-Application"/>
-  </ApplicationRef>
-  <RuleRef><Reference class="sailpoint.object.Rule" name="HR Set Inactive"/></RuleRef>
-</AttributeSource>
-```
-
-Diese Klasse von Fehlern ist besonders unangenehm, weil nichts auffällt: kein Stacktrace,
-keine Warnung, nur ein Attribut, das stillschweigend seinen Vorgabewert behält. Prüfen
-lässt sich so etwas nur, indem man die Regel isoliert über `context.runRule(rule, args)`
-aufruft und ihr Ergebnis mit dem tatsächlichen Attributwert vergleicht.
-
-### Reihenfolge: durchsuchbare Attribute vor der ersten Aggregation
-
-Der `managerCorrelationFilter` auf `employeeNumber` blieb zunächst wirkungslos — die
-Hierarchie war leer, ohne jede Fehlermeldung. Der Filter selbst war korrekt; ein
-isolierter Test mit `Filter.eq("employeeNumber", "1001")` fand die richtige Identität.
-
-Die Ursache war die Reihenfolge: Beim ersten Aggregationslauf war `employeeNumber` noch
-nicht als `extendedNumber` definiert, lag also nur im XML-Blob und war nicht filterbar.
-Nach dem Import der ObjectConfig muss die Aggregation deshalb **erneut** laufen.
-
-Merksatz: Erst `ObjectConfig`, dann Aggregation, dann Refresh. Ein nachträglich ergänztes
-durchsuchbares Attribut erfordert einen weiteren Aggregationslauf.
-
-### Stille Fehlkonfiguration — das wiederkehrende Muster
-
-Vier Fehler dieses Aufbaus hatten dieselbe Signatur: **kein Fehler, kein Logeintrag, keine
-Wirkung.** Das Objekt wird sauber importiert und gespeichert; ausgewertet wird es nicht.
-
-| Fehlende Angabe | Folge |
-|---|---|
-| `AttributeSource` ohne `ApplicationRef` | Die Regel wird nie aufgerufen |
-| `MatchTerm` ohne `type="IdentityAttribute"` | IIQ wertet ihn als Entitlement — der Selector greift nie |
-| Attribut ohne `extendedNumber` | Der Wert liegt nur im XML-Blob, kein Filter findet ihn |
-| `featuresString` ohne `MANAGER_LOOKUP` | Der `managerCorrelationFilter` wird ignoriert |
-
-Der letzte Fall ist besonders tückisch: Der Filter steht korrekt in der Applikation, ein
-`get Application` zeigt ihn an — nur ausgewertet wird er nicht. Die aus der Oberfläche
-exportierten **DelimitedFile-Vorlagen führen `MANAGER_LOOKUP` nicht**, LDAP-Applikationen
-dagegen schon.
-
-**Konsequenz für die Fehlersuche:** Ein Blick in das gespeicherte Objekt genügt nicht — er
-zeigt nur, dass der Wert *da* ist. Belastbar ist nur der Vergleich von erwartetem und
-tatsächlichem Ergebnis:
-
-```
-// Regel isoliert aufrufen und mit dem Attributwert vergleichen
-Object erwartet = context.runRule(rule, args);
-boolean tatsaechlich = identity.isInactive();
-```
-
-So ließ sich zeigen, dass `HR Set Inactive` das richtige Ergebnis lieferte und trotzdem
-nie zur Anwendung kam.
-
-### `MatchTerm`: `null` ist nicht leer
-
-Zur Abgrenzung des Leaver- vom Joiner-Fall sollte ein Selector prüfen, ob `endDate`
-gesetzt ist:
-
-```xml
-<MatchTerm name="endDate" type="IdentityAttribute" negative="true" value=""/>
-```
-
-Das trifft auch auf künftige Eintritte zu, denn dort ist `endDate` **`null`**, nicht leer —
-und `null` ist ungleich `""`. Gemessen: 10 Leaver-Läufe bei 4 echten Leavern.
-
-Gelöst über eine `TriggerRule` mit `Util.isNotNullOrEmpty(...)` und `type="Rule"` am
-Trigger. Letzteres bewusst: Ob IIQ bei `type="AttributeChange"` eine zusätzliche
-`TriggerRule` überhaupt auswertet, ist nicht belegt — keiner der mitgelieferten Trigger
-kombiniert beides.
-
-**Zur Sache selbst:** Joiner und Leaver sind über `inactive` allein nicht unterscheidbar.
-Beide wechseln von `false` auf `true`, denn wer erst nächsten Monat anfängt, ist heute
-ebenso gesperrt wie jemand, der gegangen ist. Das Austrittsdatum trennt die Fälle.
-
-### Web-Services-Connector: vier Stolpersteine
-
-Die maßgebliche Referenz ist **`WEB-INF/config/connector/WebServices.xml`** im Paket — die
-Formulardefinition, aus der die Oberfläche ihre Felder baut. Daraus:
-
-```
-authenticationMethod:  BasicLogin | OAuthLogin | OAuth2Login | No Auth
-operationType:         Test Connection | Account Aggregation |
-                       Account Delta Aggregation | Group Aggregation |
-                       Get Object | Get Object-Group | Create Account |
-                       Update Account | Delete Account |
-                       Enable Account | Disable Account
-```
-
-**1. `entry` verträgt keinen CDATA-Inhalt.** Die DTD sagt
-`<!ELEMENT entry ((key)?,(value)?)>` — der JSON-Rumpf gehört in ein
-`<value><String><![CDATA[…]]></String></value>`.
-
-**2. `responseCode` will `Integer`.** Mit `<String>200</String>` bricht der Connector mit
-`class java.lang.String cannot be cast to class java.lang.Integer` ab.
-
-**3. Der Name des Rumpf-Feldes hängt am `bodyFormat`:**
-
-| `bodyFormat` | Feldname |
-|---|---|
-| `raw` | **`rawBody`** |
-| `json` | `jsonBody` |
-
-Der falsche Name lässt `WebServiceFacadeV2.initInternal` mit einer NullPointerException
-abbrechen — die Konsole meldet nur **`null`**, ohne Hinweis auf die Ursache. Gefunden
-durch Eingrenzen: eine minimale Applikation, die lief, dann schrittweise erweitert.
-
-**4. `paginationSteps` ist ein URL-Fragment, kein Schlüsselwort.** In der
-Formulardefinition ist es ein `textarea`. Der Wert `"offset"` wird nicht als Paging
-erkannt; der Connector ruft denselben Endpunkt endlos auf — gemessen **11.943 Aufrufe**,
-bis die Aufgabe von Hand beendet wurde. Bei kleinen Datenmengen Paging besser weglassen.
-
-Bei Endlosschleifen: Die Aufgabe hängt auch nach einem `docker compose restart iiq` noch
-als laufend in `spt_task_result`. Erst nach
-
-```sql
-UPDATE spt_task_result SET completion_status='Terminated' WHERE completion_status IS NULL;
-```
-
-lässt sie sich neu starten.
-
-### SCIM 2.0: `authType` und der Klassenlader
-
-**`authType="oauthBearer"`** für einen statischen Token — nicht `oauth2`, das entspricht
-`OAuth2Login` und erwartet einen vollen Token-Fluss. Mit dem falschen Wert antwortet der
-Server mit `401 invalidCredentials`. Die gültigen Werte:
-
-```
-javap -p -constants openconnector/connector/scim2/SCIM2Constants.class
-  AUTH_TYPE_BASIC             = "Basic"
-  AUTH_TYPE_BEARER            = "oauthBearer"
-  AUTH_TYPE_OAUTH2            = "OAuth2Login"
-  AUTH_TYPE_NO_AUTHENTICATION = "No Auth"
-```
-
-**`Class.forName` beweist bei Connector-Bundles nichts.** Ein Test auf
-`openconnector.connector.scim2.SCIM2Connector` meldet `ClassNotFoundException`, obwohl die
-Klasse in `connector-bundle-webservices.jar` liegt: Der `OpenConnectorAdapter` lädt sie
-über einen eigenen Klassenlader. Aussagekräftig ist nur
-
-```
-connectorDebug "<Applikation>" test
-```
-
-### Compose-Override: Listen werden gemergt, Skalare ersetzt
-
-Ein Unterschied mit Folgen. `docker-compose.override.yml` wird automatisch geladen und ist
-damit der **Normalbetrieb**:
-
-| Typ | Verhalten |
-|---|---|
-| `volumes:`, `ports:` (Listen) | werden **zusammengeführt** |
-| `environment:`-Einträge (Skalare) | werden **ersetzt** |
-
-Dadurch war `CATALINA_OPTS` im Override eine stille Kopie, die auseinanderlief:
-`-Dcom.sun.jndi.ldap.connect.pool.protocol` stand nur in der Basis und war im Alltag
-**nie aktiv**. Nachweisbar mit:
-
-```
-docker compose config | grep CATALINA_OPTS
-```
-
-Gelöst über `${IIQ_EXTRA_OPTS}`: Die Basis hängt die Variable an, der Override setzt nur
-diesen Zusatz. Wichtig dabei — Compose expandiert `${...}` nur aus der `.env`, nicht aus
-dem `environment`-Block eines anderen Dienstes.
-
-### Das Fehlermuster im Entrypoint ist sicherheitskritisch
-
-`iiq_console_checked()` bricht bei einem Treffer ab; wegen `set -e` endet der
-Init-Container dann mit Fehler, und `iiq` startet wegen
-`condition: service_completed_successfully` **gar nicht erst**. Ein falsch positiver
-Treffer blockiert also den gesamten Stack.
-
-Das ursprüngliche Muster enthielt `Unable to ` und das blanke `Exception` — beides kommt in
-harmlosen Meldungen vor (`Unable to find localized message for key …`). Jetzt:
-
-```
-^Error:|^Caused by:|^[[:space:]]*at sailpoint\.|(java|javax|org|sailpoint|bsh)\.[A-Za-z.]*(Exception|Error)
-```
-
-Gegen die realen Meldungen dieser Sitzung geprüft: erkennt `RuntimeException`,
-`SAXParseException`, `bsh.EvalError`, Stacktraces und `GeneralException`; lässt
-`Unable to find…`, `ExceptionHandler` und normale Importausgaben durch.
-
-**Wer das Muster ändert, testet es gegen beide Listen** — ein zu enges Muster lässt echte
-Fehler durch, ein zu breites blockiert den Start.
-
-### Generator: Mindestbesetzung je Abteilung
-
-`max(MIN_PRO_ABTEILUNG, …)` hebt kleine Abteilungen an; in der Summe liegt das über dem
-Sollwert, die Rundungsdifferenz wird **negativ**. Früher ging sie pauschal auf
-`headcounts[0]` — dadurch wurde Sales als größte Abteilung negativ und in `build_people`
-stillschweigend übersprungen:
-
-```
---users   5  ->  14 Personen, Sales fehlt
---users  16  ->  16 Personen, Sales fehlt
---users  20  ->  20 Personen, vollständig
-```
-
-Jetzt wird der Fehlbetrag reihum abgezogen, ohne unter den Mindestwert zu gehen, und
-`main()` lehnt zu kleine Werte mit einer Meldung ab statt still zu klemmen.
-
-### Shell-Skripte: literale CR-Bytes machen die Datei für Git binär
-
-`verify.sh` enthielt sieben literale CR-Bytes in `tr -d '<CR>'`. Folge:
-
-```
-$ git ls-files --eol scripts/verify.sh
-i/-text w/-text attr/text eol=lf   scripts/verify.sh
-```
-
-`-text` heißt: Git behandelt die Datei als **binär**, und die `eol=lf`-Normalisierung aus
-`.gitattributes` greift nicht mehr. Damit war ausgerechnet im Prüfskript die Lücke offen,
-die oben unter „CRLF unter Windows" als Container-Killer beschrieben ist.
-
-Statt eines literalen CR gehört dort `tr -d '[:space:]'` hin. Prüfen mit
-`git ls-files --eol scripts/`: alle Shell-Skripte müssen `i/lf w/lf` zeigen.
-
-### Ports an 127.0.0.1 binden
-
-Docker veröffentlicht Ports ohne Präfix auf `0.0.0.0` — die Datenbank wäre dann im
-gesamten Netz erreichbar, etwa im Kundennetz oder im Hotel-WLAN. Alle Bindungen tragen
-deshalb `127.0.0.1:`; der Zugriff vom eigenen Rechner bleibt möglich.
-
-### `data/` gehört nicht in den Build-Kontext
-
-Kein Dockerfile kopiert daraus — alles läuft über Bind-Mounts. Stünde es in der Whitelist
-von `.dockerignore`, würde jede Änderung an einer XML-Datei in `data/objects` den
-Kontext-Hash ändern und Builds unnötig anstoßen.
-
-### YAML-Faltblöcke kennen keine Kommentare
-
-In `CATALINA_OPTS: >-` wird **jede** Zeile Teil des Wertes — auch eine, die mit `#`
-beginnt. Sie landet als Argument bei der JVM, und Tomcat startet nicht mehr:
-
-```
-iiq  | Error: Could not find or load main class ssl
-iiq  | <Java gibt seine vollständige Optionshilfe aus>
-```
-
-Erläuterungen gehören deshalb **vor** den Block, nicht hinein. Prüfen lässt sich der
-tatsächliche Wert mit:
-
-```
-docker compose config | grep CATALINA_OPTS
-```
-
-**Werte mit Leerzeichen lassen sich im Faltblock gar nicht übergeben.** Beispiel
-`-Dcom.sun.jndi.ldap.connect.pool.protocol=plain ssl`:
-
-- ohne Anführungszeichen zerlegt die Shell die Option, `ssl` wird ein eigenes Argument
-- mit Anführungszeichen landen diese als Literale im Wert
-
-Beides verhindert den Start. Die Option ist deshalb nicht gesetzt; wer sie braucht, nutzt
-`JAVA_TOOL_OPTIONS` im `environment`-Block, wo normale YAML-Quotierung gilt.
-
-Der Fehler war vorher **latent**: Der Override überschrieb `CATALINA_OPTS` vollständig und
-enthielt die Zeile nicht. Erst als die Duplizierung aufgelöst wurde, wurde die Option
-wirksam — und brach den Start. Ein Beispiel dafür, dass das Beheben einer Inkonsistenz
-einen verborgenen Fehler freilegen kann.
-
-### Nach einem Umzug des Docker-Datenverzeichnisses
-
-Ein Verschieben des Docker-Data-Root von `C:` nach `E:` hat Images und Volumes hier
-vollständig erhalten — inklusive `iiq85_pgdata` mit dem initialisierten Schema. Der
-Neuaufbau war nicht nötig.
-
-Die angezeigte Image-Größe kann danach abweichen (`iiq-app` zeigte statt 1,73 GB plötzlich
-4,24 GB), weil geteilte Basis-Layer neu gezählt werden. Das ist ein Anzeigeeffekt, kein
-echter Mehrverbrauch.
-
-### Verwaiste Container blockieren den Namen
-
-Nach abgebrochenen Läufen kann Docker Desktop einen Eintrag behalten, der weder über den
-Namen noch über die ID entfernbar ist, den Namen aber weiterhin belegt. `docker compose up`
-scheitert dann mit „Container name is already in use".
-
-Erst `docker compose down --remove-orphans` (ohne `-v`!). Hilft das nicht oder antwortet
-`docker ps` nicht mehr, hilft nur ein Neustart von Docker Desktop — Volumes und Images
-überleben das.
-
-## Die vier Referenzprojekte
-
-Lagen unter `Other SailPoint IdentityIQ Docker Projekts als Reference/` (per `.gitignore`
-ausgeschlossen). Analyse-Ergebnis in Kürze:
-
-| Projekt | Stärke | Schwerster Mangel |
+| unpacked | ~1 GB, **8,984 files** |
+| of which `WEB-INF/lib-connectors` | 562 MB, 15 bundles |
+
+Hence multi-stage builds, a whitelist `.dockerignore`, the WAR deleted after unpacking,
+and the ~1 GB `COPY` as the **last** layer in `docker/iiq/Dockerfile` so script edits
+never invalidate it. `data/` is deliberately outside the build context — nothing copies
+from it; a changed XML would otherwise re-trigger builds.
+
+## Architecture decisions
+
+**Init container.** `iiq-init` runs once and exits; `iiq` starts only after
+`service_completed_successfully`. Keeps "initialize once" apart from "serve", and stays
+correct with multiple IIQ nodes later.
+
+**Idempotency via database state, not a marker file.** `entrypoint.sh` runs
+`get Identity spadmin`. Reference project A uses a marker in a volume-mounted Tomcat
+directory — which also makes image rebuilds a no-op there. DB state survives rebuilds,
+restarts and volume swaps.
+
+**Plaintext passwords, deliberately.** `iiq encrypt` binds values to the keystore
+(`WEB-INF/classes/iiq.dat` + `iiq.cfg`). With the keystore inside the image that buys
+nothing; reference project D even committed its keystore. For a dev box, plaintext from
+`.env` is honest. Production would mount the keystore externally.
+
+**`ImportAction name='merge'` instead of `sed`** for `SystemConfiguration` changes.
+Patching `init.xml` (project A) is destructive and does not survive upgrades.
+
+**Test data is generated from one person list.** `scripts/generate-testdata.py` emits
+the HR CSV and both LDIFs. The LDAP seed accounts' `employeeNumber` **must** match a CSV
+row or nothing correlates; two hand-maintained files would drift after the first edit.
+Fixed `SEED` → identical data on every run → comparable IIQ test runs.
+
+**Targets are nearly empty.** The HR CSV is the source of identities; LDAP, JDBC, SCIM
+and the REST mock are targets where IIQ creates accounts. Each keeps a handful of seed
+accounts so the correlation path is exercised too, not only the create path. Groups and
+roles in the targets are complete — they are the entitlements IIQ assigns.
+
+**Ports bind to `127.0.0.1`.** Docker publishes on `0.0.0.0` by default; on a laptop in
+a customer or hotel network the database would be reachable by everyone. The JDWP
+debug port (8000) is an RCE vector if exposed — it is loopback-only via the override.
+Inside the bridge network it necessarily listens on `0.0.0.0:8000`, so any sibling
+container could attach a debugger; accepted for a dev stack, documented in the
+override header.
+
+**Cheap container hardening that costs nothing here:** `security_opt:
+no-new-privileges` on every service; `cap_drop: [ALL]` on the three images we build
+(uid 1000, ports > 1024). Not on postgres/openldap — their entrypoints chown and drop
+privileges themselves. `ADD` of the JDBC driver carries `--checksum=sha256:…`
+(cross-checked against Maven Central's `.sha1`); bumping `PG_JDBC_VERSION` means
+updating the hash. Every third-party image is pinned by tag or digest; `dnknth/ldap-ui`
+and `harrykodden/scim` by digest because they are personal namespaces with mutable
+tags.
+
+**Secrets never go to stdout.** The mock prints `Bearer token: set`, not the value —
+`docker compose logs` ends up in log exports. (Reference project C `cat`s
+`iiq.properties` into its log.)
+
+**Compose override.** `docker-compose.override.yml` loads automatically and therefore
+*is* the normal mode. Compose **merges lists** (`volumes`, `ports`) but **replaces
+scalars** (`environment` entries). `CATALINA_OPTS` was once duplicated there and drifted
+silently — an option only in the base file was never active. Now the base appends
+`${IIQ_EXTRA_OPTS}` from `.env`; the override sets nothing else. Compose expands `${…}`
+only from `.env`, not from another service's `environment` block.
+
+## System landscape
+
+| Object | Type | Role | Seed data |
+|---|---|---|---|
+| `HR-Application` | DelimitedFile, `authoritative="true"` | source | 100 people, `data/hr/HR-people.csv` |
+| `LDAP-Target` | LDAPConnector | target | 5 accounts, 50 groups |
+| `JDBC-Target` | JDBCConnector → `targetdb` in the same Postgres | target | 3 accounts, 6 roles |
+| `SCIM-Target` | OpenConnectorAdapter / SCIM2Connector → `scim` container | target | 3 accounts |
+| `WebService-Target` | WebServicesConnector → `mockapi` container | target | 4 accounts, 5 groups |
+
+Correlation everywhere is `employeeNumber` (identity) = personnel number on the
+account (`employeeNumber`, `IIQID`, `externalId`, `employeeId` respectively).
+
+**Lifecycle.** `startDate`/`endDate` in the CSV → rule `HR Set Inactive` computes the
+standard attribute `inactive` (start in the future or end reached → `true`) → two
+`IdentityTrigger`s on the `inactive` transition start `HR Joiner Workflow` /
+`HR Leaver Workflow`. The leaver builds a `Disable` plan for every non-authoritative
+link; the joiner first `Enable`s links IIQ knows as disabled (returning person), then
+`refreshIdentity` with provisioning creates whatever the roles require. Status in the
+CSV is *derived* from the dates by the generator, never rolled independently —
+otherwise rows contradict each other. Verified: 10 inactive = exactly 6 future joiners
++ 4 leavers. The workflows only run on a *transition* (see Pitfalls), so a fresh
+database shows 0 runs; the live test in the README shows one each.
+
+**Task order for a fresh database** (Setup → Tasks): HR Aggregation → LDAP Group
+Aggregation → LDAP Account Aggregation → JDBC Aggregation → SCIM Aggregation →
+WebService Group/Account Aggregation → Refresh Identity Cube. Groups before accounts,
+or entitlements reference unknown groups and get no display name.
+
+## Reference run
+
+Measured on 2026-09-22 from `docker compose down -v` through the eight tasks; this is
+what a correct fresh setup looks like. Anything else is a regression.
+
+| Metric | Value | Why |
 |---|---|---|
-| **A** `docker-IdentityIQ` | Patch-/Versions-Handling, `iiq schema`-Fallback für Custom-WARs | Init läuft im gemounteten Volume → Rebuild wirkungslos; `apt-get install mariadb-server` zur Laufzeit |
-| **B** `iiq-docker-developer-days-2025` | DDL im DB-Image, DB-basierte Idempotenz, `import_folder()`, `/data/objects`-Mount | Compose baut nichts, README ohne Build-Befehl |
-| **C** `sailpoint-iiq-docker` | Init-Container-Pattern, Multi-DB, Demo-Daten, Traefik mit Sticky Sessions | Passwörter im Klartext ins Log (`cat iiq.properties`), Tomcat-Manager offen |
-| **D** `standalone-docker-sailpoint-iiq` | SSB-Pipeline, `iiq encrypt`, non-root, Apache-Härtung | Java 8, MySQL 5.7, Keystore und privater Schlüssel im Repo, Init nur per `docker exec` |
+| identities | 105 | 100 HR + spadmin + 4 stock |
+| with manager | 92 | every CSV row with `managerEmployeeNumber` |
+| inactive | 10 | 6 future joiners + 4 leavers |
+| open workflow cases / forms | 0 / 0 | no stuck provisioning |
+| provisioning transactions | 270, all `Success` | 85 LDAP `Create`, 5 LDAP `Modify` (seed accounts get groups), 180 `IdentityIQ` role assignments |
+| LDAP-Target links = directory entries | 90 | 5 seed + 85 created; 90 active people |
+| roles | employee 90, it-staff 19, sales-staff 18, manager 18 | exact CSV counts |
+| leaver / joiner workflow runs | 0 / 0 | triggers fire on transitions; see the lifecycle pitfall |
 
-Übernommen wurde: Architektur und Dev-Loop von **B**, Init-Container von **C**,
-Sicherheitsmodell von **D**, Patch-Handling von **A**. Ergänzt wurden Healthchecks,
-gepinnte Image-Tags und `set -euo pipefail` — das fehlt in allen vieren.
+The three items that were open before this run — roles at 0, manager empty, the
+Daniel Morgan merge — are closed; their root causes are recorded under Pitfalls
+(`MatchExpression` OR default, `noManagerCorrelation`/`alwaysRefreshManager`, HR
+correlation and naming). SCIM correlation was never broken: the three seed users
+correlate once the identities exist, i.e. after `HR Aggregation`.
 
-## Hinweise für die Arbeit an diesem Repo
+Verified afterwards on the same database with the CSV edit from the README
+(one active person, `endDate` yesterday): one `HR Leaver: <name>` run, LDAP entry
+gets `pwdAccountLockedTime: 000001010000Z`, REST account `status=DISABLED`, both
+links `iiqDisabled=true`; row restored: one `HR Joiner: <name>` run, the lock value
+removed, REST `ACTIVE`, both links enabled, every provisioning transaction `Success`.
+Not verified: JDBC/SCIM/REST *creates* — no role grants them, the roles only carry
+LDAP entitlements, so those targets keep their seed accounts.
 
-- **Commits ohne Claude-Attribution.** Autor ist Michael Langer. Keine
-  `Co-Authored-By`-Zeilen, kein „Generated with".
-- **Sprache:** Deutsch, auch in Kommentaren. In den Shell-Skripten und Dockerfiles werden
-  Umlaute als `ae/oe/ue` geschrieben, um Encoding-Probleme im Container zu vermeiden; in
-  Markdown-Dateien werden echte Umlaute verwendet.
-- **Nach Änderungen an `.env`-DB-Werten** ist ein Rebuild nötig, weil die Passwörter in die
-  DDL und in `iiq.properties` eingebacken werden:
+## Pitfalls
+
+### Docker, Compose, Windows
+
+- **CRLF.** `.gitattributes` forces `eol=lf` on shell scripts *including* files without
+  a `.sh` suffix (`entrypoint`, `healthcheck`, `console`). Otherwise
+  `bad interpreter: No such file or directory`. Project B only covers `*.sh`.
+- **`exec format error` with third-party images.** With the containerd image store
+  Docker picks the **first** manifest entry, not the host arch. `axllent/mailpit` lists
+  `linux/386` first, `dpage/pgadmin4` `arm64` first; `docker image inspect` still says
+  `amd64`. Check with `docker manifest inspect <image> | grep '"architecture"'`; set
+  `platform: linux/amd64`. pgAdmin failed even with that → replaced by DBGate. LDAP
+  browser is `dnknth/ldap-ui` (amd64 first; phpLDAPadmin images are stale or arm-first;
+  LLDAP is a server, not a browser). SCIM image has no version tags → pinned by digest.
+- **YAML folded blocks have no comments.** In `CATALINA_OPTS: >-` a `#` line becomes part
+  of the value and reaches the JVM: `Error: Could not find or load main class ssl`, then
+  the full Java option help. Values containing spaces (`…pool.protocol=plain ssl`)
+  cannot be passed in a folded block at all — unquoted the shell splits them, quoted the
+  quotes become literals. That option is therefore not set; use `JAVA_TOOL_OPTIONS` if
+  needed. Inspect the real value with `docker compose config | grep CATALINA_OPTS`.
+- **Orphaned container names** after aborted runs: `docker compose up` says
+  "name is already in use" but neither `docker rm <name>` nor `<id>` finds it. Try
+  `docker compose down --remove-orphans` (no `-v`); if `docker ps` hangs, restart Docker
+  Desktop — volumes and images survive. **Never `Stop-Process -Force` Docker Desktop**;
+  that leaves a half-dead WSL VM ("Starting the Docker Engine…" at 0 % CPU forever).
+  `wsl --shutdown`, then start normally.
+- Moving the Docker data root (C: → E:) preserved images and volumes, including the
+  initialized `iiq85_pgdata`. Displayed image sizes change afterwards (1.73 → 4.24 GB)
+  because shared base layers are recounted; not real consumption.
+- **`docker compose exec` under Git Bash** rewrites `/data/hr` into a Windows path
+  (MSYS path conversion). Wrap container paths in `sh -c '…'` or set
+  `MSYS_NO_PATHCONV=1`.
+- **Certificate import was a silent no-op for the whole project history.** Temurin ships
+  `$JAVA_HOME/lib/security/cacerts` as `root:root 0644`; the container runs as uid 1000,
+  every `keytool -importcert` failed, stderr went to `/dev/null`, the log said
+  "skipped". And it ran only in `iiq-init`, whose writable layer the `iiq` container
+  never sees. Now: the Dockerfile chowns `cacerts` to 1000, the import runs in both
+  containers, and only "already exists" is tolerated — any other keytool error fails
+  the start. Test: drop a self-signed `.crt` into `data/certs/`, restart, expect
+  `imported.` in the log.
+- **`iiq "plugin install x.zip"` never worked.** The Launcher has no `plugin`
+  application (`schema | extendedSchema | upgrade | patch | console | encrypt |
+  integration | oim | exportschema`); every ZIP failed and `|| log` hid it. The console
+  has `plugin install <path>`; the entrypoint now pipes that through
+  `iiq_console_checked`.
+- **`data/certs/` and `data/hr/` are gitignored except for the tracked seed CSV** —
+  key material (`.key .p12 .pfx .jks`) or a real HR extract dropped there for a test
+  must not reach `git add -A`.
+- **`curl -w '%{http_code}'` prints the code even when curl exits non-zero.** With
+  `--max-time` hit while the body was still streaming (JVM busy with two
+  aggregations), `$(curl … || echo 000)` produced `HTTP 200000` and a false `[FAIL]`
+  in `verify.sh`. Fall back to `000` only when nothing was printed.
+- **Bash 5.2 treats `&` in `${var//pat/repl}` as "the match"** (`patsub_replacement`,
+  on by default). `${f//\'/&apos;}` turned `'` into `'apos;`, and an unescaped `'`
+  inside the pattern is a parse error at an unrelated line 100 lines later
+  (`syntax error near unexpected token '('`). The manifest escaping uses `sed`.
+  `bash -n` on every script before a rebuild — the init container is the only place
+  that runs them and a parse error there blocks the whole stack.
+
+### The IIQ console
+
+- **`iiq console` does not exit on EOF.** `echo cmd | iiq console` hangs forever — first
+  observed as 10 minutes at 43 % CPU with no output. Always append `quit`;
+  `iiq_console()` in the entrypoint does.
+- **Exit code is 0 on failure.** Stack traces go to stdout. `iiq_console_checked()`
+  greps the output. The pattern is safety-critical: a false positive fails the init
+  container and, via `service_completed_successfully`, **blocks the whole stack**.
+  Current pattern, tested against both real failures and harmless output:
   ```
-  docker compose build && docker compose down -v && docker compose up -d
+  ^Error:|^Caused by:|^[[:space:]]*at sailpoint\.|(java|javax|org|sailpoint|bsh)\.[A-Za-z.]*(Exception|Error)
   ```
-- **Eigene IIQ-Objekte** gehören nach `data/objects/`. Ein Präfix steuert die
-  Import-Reihenfolge (`10-`, `20-` …), weil `import_folder()` nach `sort` arbeitet.
+  Catches `RuntimeException`, `SAXParseException`, `bsh.EvalError`, `GeneralException`,
+  stack traces; passes `Unable to find localized message…`, `ExceptionHandler`, normal
+  import lines. Anyone changing it re-tests both lists.
+- **`run` needs quotes** around names with spaces. `run LDAP Group Aggregation` → tries a
+  task named `LDAP` → "Ambiguous objects", exit code 0, nothing runs.
+- **`run` returns immediately.** `quit` right after shuts the scheduler down and aborts
+  the task ("The Scheduler has been shutdown"). Keep the console open until the task
+  finishes; poll `spt_task_result.completion_status`. Do not trust sleep estimates —
+  a refresh once ran *before* its aggregation because the sleep was too short; check
+  timestamps.
+- A task killed mid-run stays "running" in `spt_task_result` even after a container
+  restart. `UPDATE spt_task_result SET completion_status='Terminated' WHERE
+  completion_status IS NULL;` before re-running.
+- `import init.xml` must precede `iiq patch`.
+- **`source` is not a BeanShell runner.** It reads a file as console commands. For ad-hoc
+  code, import a temporary `Rule` and `rule "name"` it; delete it afterwards.
+
+### IIQ XML and the DTD
+
+The DTD is generated at runtime by `sailpoint.tools.xml.DTDBuilder`; there is no file.
+Dump it with `dtd /tmp/sp.dtd` in the console. Findings from 8.5:
+
+- `ObjectAttribute` has **no `searchable`** — use `extendedNumber="n"` (columns
+  `extended1…N`) or `namedColumn="true"`. Without one, the value sits only in the XML
+  blob and **no filter can see it**: selectors and `managerCorrelationFilter` fail
+  silently.
+- `AttributeSource` allows only `ApplicationRef|RuleRef`. The source attribute name goes
+  into `name=`.
+- A rule-based `AttributeSource` **needs an `ApplicationRef`** too. With `RuleRef` alone
+  the rule is never invoked — `context.runRule()` returned `true` for a leaver while
+  `Identity.inactive` stayed `false`. Production exports use the `AppRule: …` form.
+- `IdentityTrigger` references its workflow via the **attribute** `handler` plus
+  `HandlerParameters`; there is no `<Handler>` element. Types: `Create`, `Delete`,
+  `AttributeChange`, `Rule`, `ManagerTransfer`, `NativeChange`, `Alert`, `RapidSetup`
+  (capital R). Template: `get IdentityTrigger Leaver`.
+- `TaskDefinition` type for a refresh is `Identity`, not `IdentityRefresh`. Group
+  aggregation uses `sailpoint.task.ResourceIdentityScan` with
+  `aggregationType=group`; `sailpoint.task.AccountGroupScan` no longer exists (task ends
+  in `Error` with the class name as the only message).
+- **Unknown task options are silently dropped.** `refreshAssignedRoles` does not exist
+  in 8.5; the task reports Success. Valid names: `get TaskDefinition "Identity Refresh"`.
+- **`checkDeleted` defaults to false.** Accounts deleted in the target stay as links
+  forever, and a refresh will not recreate them because the role is "satisfied" by the
+  stale link. Measured after a directory reset: 5 entries, aggregation Success, 90
+  links, 0 creates. Every target account aggregation here sets it; the HR aggregation
+  too (a row removed from the CSV must drop its link).
+- Role type `organization` maps to `organizational`, which has
+  `noAssignmentSelector="true"` and `noAutoAssignment="true"` — it cannot carry a
+  selector and is never auto-assigned. Import accepts it anyway. Use `business`.
+  Types: `get ObjectConfig Bundle`.
+- `MatchTerm` needs `type="IdentityAttribute"`; without it the term is evaluated as an
+  entitlement. And `negative="true" value=""` means "≠ empty string" — it also matches
+  `null`. Measured: 10 leaver runs for 4 real leavers. Use a `TriggerRule` with
+  `Util.isNotNullOrEmpty()` for "is set".
+- `featuresString` must contain `MANAGER_LOOKUP` or `managerCorrelationFilter` is
+  ignored. DelimitedFile UI exports omit it; LDAP exports include it.
+- **Ordering:** import `ObjectConfig` *before* the first aggregation. An attribute made
+  searchable later needs another aggregation run.
+- **`MatchExpression` is OR unless `and="true"`.** `IdentitySelector$MatchExpression._and`
+  defaults to false; IIQ's own config writes `<MatchExpression and="true">` wherever AND
+  is meant. Measured: `it-staff` (department=IT AND hrStatus=active intended) matched
+  **90 of 111** identities instead of 18, `sales-staff` 93. Every multi-term selector
+  needs `and="true"`; an OR inside an AND is a `container="true" and="false"` term.
+- **Standard identity attributes have no source unless you add one.** The stock
+  `ObjectConfig:Identity` defines `firstname`, `lastname`, `email`, `displayName` with
+  **no** `AttributeSource`. Mapping only custom attributes left all 111 HR identities
+  with NULL names; every create policy derives `sn`/`givenName`/`cn` from them, `sn` is
+  required, so the Provisioner opened **94 provisioning forms** for spadmin and created
+  zero accounts — while every task reported Success. `IdentityRefreshExecutor` then
+  skips identities with a pending case, which hides the problem on the next run too.
+  Clean up with `delete WorkflowCase "<name>"` in the console (Terminator removes case,
+  TaskResult and WorkItem).
+- **`template="true"` hides a TaskDefinition from Setup > Tasks.** The list bean filters
+  `template=false`; the objects exist and run from the console, but the UI shows
+  nothing. Runnable tasks are `template="false"` with a `<Parent>` reference to the
+  stock template (`Account Aggregation`, `Account Group Aggregation`,
+  `Identity Refresh`).
+- **`call:provisionProject` wants `project`, not `plan`.** Compile first:
+  `call:compileProvisioningProject` with `plan` → `resultVariable="project"`, then
+  provision with `project`. Passing `plan` throws "Missing argument: project" — unseen
+  until the first identity actually needs provisioning.
+- **An authoritative application needs a `CorrelationConfig` too.** Without one the
+  aggregator matches on the identity *name*, and the name of a new identity is the
+  account's display attribute. Two "Daniel Morgan" rows (1007, 1030) became one
+  identity with two HR links: 100 links, 99 identities, every count one short and
+  no error anywhere. Fix: `AccountCorrelationConfig` on `employeeNumber` plus an
+  `IdentityCreation` rule that names identities `first.last` and appends the employee
+  number on a clash. Element name inside `Application` is `AccountCorrelationConfig`,
+  not `CorrelationConfig` (DTD); children of `Application` may appear in any order.
+- **Lifecycle triggers fire on transitions, not on state.** On a fresh database the
+  four leavers are created with `inactive=true` straight away (the attribute rule
+  runs during aggregation), so `Refresh Identity Cube` starts **0** leaver workflows;
+  the "4 leaver runs" measured earlier came from a database where the rule had not
+  run at aggregation time. To see the leaver: change a row's `endDate`/`status` in
+  the live CSV, run `HR Aggregation`, then the refresh — one workflow, accounts
+  disabled. Undo the row and repeat: one joiner, accounts enabled.
+- **Task results are replaced, not appended.** `resultAction` defaults to `Delete`; a
+  second `run` of a task drops the earlier `spt_task_result` row and creates a new
+  one. Polling "row exists" is therefore not enough for a re-run — compare `created`
+  against a timestamp taken before the `run`.
+- **XML comments must not contain `--`.** Use `=====` for rules, never `-----`.
+- `entry` is `((key)?,(value)?)` — a CDATA body goes into `<value><String>`.
+
+**The recurring signature — silent misconfiguration.** Six of the above share it: the
+object imports and saves cleanly, `get` shows the value, nothing is evaluated, nothing
+is logged. Inspecting the stored object proves only that the value is *there*. The only
+reliable check is expected vs. actual: run the rule/filter in isolation and compare with
+the resulting attribute.
+
+### BeanShell
+
+- **Unbound arguments are `void`, not `null`.** `if (link != null)` throws
+  `bsh.EvalError: … undefined variable or class name: link`. Normalize first:
+  ```java
+  Link hrLink = null;
+  if (link != void && link != null) hrLink = link;
+  ```
+  Applies to `link`, `result`, `accountRequest`, `oldValue` — the same rule runs from
+  aggregation (bound) and from refresh without an account (unbound). Cost when missed:
+  every identity failed, the aggregation ended in `Error`, and the database held **185
+  identities instead of 102** — each failed row spawned one.
+- **Cleanup goes through `sailpoint.api.Terminator`.** `DELETE FROM spt_identity` hits
+  foreign keys (`spt_identity_capabilities`).
+- **Check signatures by reflection, not JavaDoc.** The JavaDoc lists only `toString()`
+  for `Link`; getters are inherited. Verified in 8.5: `Link.getAttribute(String)` exists,
+  **`Link.getStringAttribute()` does not** (only `Identity` has it),
+  `ProvisioningResult.addError(String|Message|Throwable)`, `STATUS_*` =
+  `queued|committed|failed|retry`, `Schema.getAttributeDefinition(String)`,
+  `JDBCConnector.buildMapFromResultSet(ResultSet, Schema)`.
+- `Message` constructors are varargs; BeanShell does not synthesize the empty array.
+  `new Message(type, text)` fails; `new Message(type, text, null)` works.
+
+### Connectors
+
+**LDAP.** `groupOfNames` requires at least one `member` (RFC 4519); an empty group aborts
+the **entire** LDIF import with no error line — symptom: 5 accounts, 0 groups. Empty
+groups get `cn=placeholder,dc=example,dc=com` as sole member; it lives outside
+`ou=people` so account aggregation never sees it. `groupOfMembers` (optional `member`)
+is not available in the Bitnami image. The group schema's `nativeObjectType` and
+`groupMemberAttribute` must match the directory (`groupOfNames`/`member` here); a
+production export used `groupOfUniqueNames`/`uniqueMember` and would aggregate nothing.
+LDIFs load **only into an empty volume**: `docker compose rm -sf openldap &&
+docker volume rm iiq85_ldapdata && docker compose up -d openldap`.
+**Disable and Enable need three application entries each, plus the ppolicy
+overlay.** `ENABLE` in `featuresString` only advertises the operations; without
+`revokeAttr` the connector throws `No revoke attribute specified. Operation not
+allowed`, without `restoreAttr` the mirror image `No restore attribute is
+specified` — the workflow finishes "Success" either way and only the provisioning
+transaction shows the failure. Measured twice: the leaver with the revoke entries
+only, then the joiner with no restore entries. Settings (UI section "Enable Disable
+Configuration", form `config/connector/LDAP.xml`): `revokeAttr=pwdAccountLockedTime`,
+`revokeVal=000001010000Z`, `revokeAction=replace`; `restoreAttr` and `restoreVal`
+identical, `restoreAction=remove`. Action semantics in `disableObject()` and
+`enableObject()` are the same: `add` → Add, `replace` → Set (Remove when the value
+is empty), anything else → Remove of that value. The attribute exists only with the
+ppolicy overlay
+(`LDAP_CONFIGURE_PPOLICY=yes` on the Bitnami image, config written at first init →
+fresh volume); without it: `attribute type undefined`. Verify the key names against
+the connector, not the UI labels: `jar tf lib-connectors/*.jar | grep LDAPConnector`,
+`javap -c -p -constants` — the message catalog is not on the classpath in an
+unpacked WAR.
+
+**JDBC.** Fourth database in the same Postgres (`targetdb`, schema `targetapp`). Mixed-
+case column names are deliberate — Postgres folds unquoted identifiers, so every
+statement must quote them; a realistic porting trap. Five `JDBCProvision` rules plus a
+`JDBCBuildMap` rule because roles live in a join table; the built-in SQL path cannot do
+that.
+
+**SCIM 2.0.** `authType="oauthBearer"` for a static token. `oauth2` maps to
+`OAuth2Login` (full token flow) and yields `401 invalidCredentials`. Constants:
+`javap -p -constants openconnector/connector/scim2/SCIM2Constants.class`.
+`Class.forName("openconnector.connector.scim2.SCIM2Connector")` throws
+`ClassNotFoundException` although the class is in `connector-bundle-webservices.jar` —
+`OpenConnectorAdapter` uses its own class loader. Only `connectorDebug "<app>" test`
+is meaningful.
+
+**Web Services.** Reference is `WEB-INF/config/connector/WebServices.xml` (the UI form
+definition). `authenticationMethod`: `BasicLogin | OAuthLogin | OAuth2Login | No Auth`.
+`operationType`: `Test Connection | Account Aggregation | Account Delta Aggregation |
+Group Aggregation | Get Object | Get Object-Group | Create Account | Update Account |
+Delete Account | Enable Account | Disable Account`. Traps, each found by starting from a
+minimal application that worked and adding one thing at a time:
+- `responseCode` entries must be `<Integer>`; `<String>` → `ClassCastException`.
+- Body field name depends on `bodyFormat`: `raw` → **`rawBody`**, `json` → `jsonBody`.
+  The wrong one NPEs in `WebServiceFacadeV2.initInternal`; the console prints only
+  `null`.
+- `rootPath` belongs on the endpoint map (UI menu "Response Information"), not inside
+  `resMappingObj`.
+- The account `resMappingObj` must map the schema's `identityAttribute` by its own name
+  (`id` → `id`), not only `nativeIdentity`. Otherwise Success with 0 accounts. Group
+  aggregation hid this because `name` is mapped anyway.
+- `paginationSteps` is a URL fragment (a `textarea` in the form), not a keyword. The
+  value `offset` is not recognized and the connector loops: **11,943 requests** before
+  the task was killed. Omit paging for small data sets.
+- **Entitlements are deltas.** IIQ's Modify sends Add/Remove of single values, never the
+  full list. An `Update Account` body with `{"roles": $plan.roles$}` overwrites the
+  list: adding one role wipes the others, removing one *assigns* it. Use the
+  `Add Entitlement` / `Remove Entitlement` operation types; the mock exposes
+  `POST /users/{id}/roles` and `DELETE /users/{id}/roles/{role}` for exactly that.
+
+### Test data generator
+
+- Roles-per-department floor: `max(MIN_PER_DEPARTMENT, …)` pushes small departments up,
+  the rounding difference goes negative, and if dumped on `headcounts[0]` the largest
+  department (Sales) went negative and was skipped silently: `--users 5` → 14 people,
+  no Sales; `--users 16` → 16 people, no Sales. Now the shortfall is subtracted
+  round-robin above the floor and `main()` rejects `--users < 16`.
+- Privileged groups: restrict candidates **before** computing the target size, or the
+  sensitive groups collapse to one or two members.
+- Non-ASCII values must be base64 in LDIF (RFC 2849, `cn:: …`); `ldif_value()` handles
+  it. Current data is ASCII; the function stays for extensions.
+
+## Reference projects
+
+Analyzed from `Other SailPoint IdentityIQ Docker Projekts als Reference/` (gitignored).
+
+| | Strength | Worst flaw |
+|---|---|---|
+| **A** `docker-IdentityIQ` | patch/version handling, `iiq schema` fallback | init runs inside a mounted volume → rebuild is a no-op; `apt-get install mariadb-server` at runtime |
+| **B** `iiq-docker-developer-days-2025` | DDL in the DB image, DB-based idempotency, `import_folder()` | compose builds nothing, README has no build command |
+| **C** `sailpoint-iiq-docker` | init-container pattern, multi-DB, demo objects, Traefik sticky sessions | passwords `cat`ed to the log, Tomcat manager exposed |
+| **D** `standalone-docker-sailpoint-iiq` | SSB pipeline, `iiq encrypt`, non-root, Apache hardening | Java 8, MySQL 5.7, keystore and private key committed, init only via `docker exec` |
+
+Taken: architecture and dev loop from B, init container from C, security model from D,
+patch handling from A, demo-object idea from C. Added, missing in all four: health
+checks, pinned image tags, `set -euo pipefail`, loopback port binding.

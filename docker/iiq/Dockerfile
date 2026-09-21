@@ -1,26 +1,26 @@
 # ===========================================================================
-# SailPoint IdentityIQ 8.5 auf Tomcat 9 / OpenJDK 21
+# SailPoint IdentityIQ 8.5 on Tomcat 9 / OpenJDK 21
 # ---------------------------------------------------------------------------
-# Versionswahl (belegt im mitgelieferten Installation Guide, doc/):
+# Version choice (verified against the shipped Installation Guide, doc/):
 #
-#   Tomcat 9  - ZWINGEND. Der Guide listet unter "Application Servers" nur
-#               Apache Tomcat 9.0. Technisch bestaetigt: die Webapp ist
-#               javax.servlet-basiert (web-app 2.5, javax.faces 2.2.20,
-#               Spring 5.3, Hibernate 5.5). Tomcat 10/11 nutzen den
-#               jakarta.*-Namensraum - das WAR wuerde dort nicht starten.
+#   Tomcat 9  - MANDATORY. Under "Application Servers" the Guide lists only
+#               Apache Tomcat 9.0. Confirmed technically: the webapp is
+#               javax.servlet-based (web-app 2.5, javax.faces 2.2.20,
+#               Spring 5.3, Hibernate 5.5). Tomcat 10/11 use the jakarta.*
+#               namespace - the WAR would not start there.
 #
-#   JDK 21    - Offiziell unterstuetzt: "OpenJDK 21 and 17 is now supported
-#               on all environments" (Guide, Supported Platforms). Der
-#               Bytecode selbst ist auf Java 11 kompiliert (major 55) und
-#               laeuft abwaertskompatibel.
+#   JDK 21    - Officially supported: "OpenJDK 21 and 17 is now supported
+#               on all environments" (Guide, Supported Platforms). The
+#               bytecode itself targets Java 11 (major 55) and runs
+#               backward-compatibly.
 #
-# Das WAR ist 742 MB gross und entpackt sich auf ~1 GB in 8.984 Dateien
-# (davon allein 562 MB Connector-Bundles). Deshalb Multi-Stage: das ZIP
-# und die Zwischenstaende landen nicht im finalen Image.
+# The WAR is 742 MB and unpacks to ~1 GB in 8,984 files (562 MB of which
+# are connector bundles). Hence multi-stage: the ZIP and intermediate
+# states do not end up in the final image.
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Installationspaket entpacken und aufbereiten
+# Stage 1: unpack and prepare the installation package
 # ---------------------------------------------------------------------------
 FROM tomcat:9.0-jdk21-temurin AS extract
 
@@ -45,48 +45,56 @@ RUN apt-get update \
 
 WORKDIR /build
 
-# Den gesamten installer/-Ordner uebernehmen. Er enthaelt das
-# Installationspaket und - optional - ein Patch-JAR.
+# Copy the whole installer/ folder: installation package plus an
+# optional patch JAR.
 COPY installer/ /build/installer/
 
-# Nur identityiq.war herausziehen - nicht doc/, integration/ usw.
+# Extract identityiq.war only - not doc/, integration/ etc.
 RUN set -eux \
  && PKG="$(find /build/installer -maxdepth 1 -name '*.zip' | head -1)" \
  && test -n "${PKG}" \
  && unzip -j -o "${PKG}" identityiq.war -d /build
 
-# Entpacken mit "jar" statt "unzip": das JDK-Werkzeug ist im Image
-# ohnehin vorhanden (Idee aus Referenzprojekt B).
-# Das WAR wird danach geloescht - sonst laegen ~740 MB doppelt im Layer.
+# Unpack with "jar" instead of "unzip": the JDK tool is already in the
+# image (idea from reference project B).
+# The WAR is deleted afterwards - otherwise ~740 MB would sit twice in
+# the layer.
 RUN mkdir -p "${SPHOME}" \
  && cd "${SPHOME}" \
  && jar -xf /build/identityiq.war \
  && chmod +x "${SPHOME}/WEB-INF/bin/iiq"
 
-# --- Patch-JAR (optional) --------------------------------------------------
-# Ein Patch wird ueber das entpackte Verzeichnis gelegt. Die zugehoerigen
-# DB-Upgrades und "iiq patch" laufen spaeter im Init-Container.
+# --- Patch JAR (optional) --------------------------------------------------
+# A patch is laid over the unpacked directory. The corresponding DB
+# upgrades and "iiq patch" run later in the init container.
 #
-# Das Patch-JAR wird - falls vorhanden - in den Ordner installer/ gelegt
-# und ueber IIQ_PATCH (z.B. "p1") aktiviert. Liegt kein Patch vor, bleibt
-# IIQ_PATCH leer und dieser Schritt ist ein No-op.
+# The patch JAR - if present - goes into installer/ and is activated via
+# IIQ_PATCH (e.g. "p1"). With no patch, IIQ_PATCH stays empty and this
+# step is a no-op.
 #
-# Das JAR liegt bereits unter /build/installer (siehe COPY oben), es ist
-# also kein weiteres COPY noetig.
+# The JAR is already under /build/installer (see COPY above), so no
+# further COPY is needed.
 COPY docker/iiq/apply-patch.sh /tmp/apply-patch.sh
 RUN chmod +x /tmp/apply-patch.sh \
  && /tmp/apply-patch.sh "${SPHOME}" "${IIQ_VERSION}" "${IIQ_PATCH}" \
  && rm -rf /build/installer /build/identityiq.war /tmp/apply-patch.sh
 
-# --- PostgreSQL-JDBC-Treiber ----------------------------------------------
-# Der Guide stellt klar: "The JDBC driver for PostgreSQL is not provided
-# with IdentityIQ." Im WAR liegt nur mysql-connector-j. Der Treiber wird
-# deshalb hier nachgelegt.
-ADD --chmod=644 \
+# --- PostgreSQL JDBC driver ------------------------------------------------
+# The Guide is explicit: "The JDBC driver for PostgreSQL is not provided
+# with IdentityIQ." The WAR only ships mysql-connector-j, so the driver
+# is added here.
+# --checksum: HTTPS only proves we talked to repo1. A republished or
+# mirrored artifact would otherwise swap the driver - the code every DB
+# byte passes through - on the next build without any signal. SHA-256
+# computed from the jar and cross-checked against Maven Central's
+# published .sha1 (747897987b86c741fb8b56f6b81929ae1e6e4b46).
+# Bumping PG_JDBC_VERSION requires updating this hash.
+ADD --checksum=sha256:69020b3bd20984543e817393f2e6c01a890ef2e37a77dd11d6d8508181d079ab \
+    --chmod=644 \
     https://repo1.maven.org/maven2/org/postgresql/postgresql/${PG_JDBC_VERSION}/postgresql-${PG_JDBC_VERSION}.jar \
     ${SPHOME}/WEB-INF/lib/postgresql-${PG_JDBC_VERSION}.jar
 
-# --- iiq.properties auf PostgreSQL umstellen ------------------------------
+# --- Switch iiq.properties to PostgreSQL -----------------------------------
 COPY docker/iiq/iiq.properties.patch.sh /tmp/patch-props.sh
 RUN DB_HOST="${DB_HOST}" DB_PORT="${DB_PORT}" \
     IIQ_DB_USER="${IIQ_DB_USER}" IIQ_DB_PASSWORD="${IIQ_DB_PASSWORD}" \
@@ -96,56 +104,60 @@ RUN DB_HOST="${DB_HOST}" DB_PORT="${DB_PORT}" \
  && rm -f /tmp/patch-props.sh
 
 # ---------------------------------------------------------------------------
-# Stage 2: Laufzeit-Image
+# Stage 2: runtime image
 # ---------------------------------------------------------------------------
 FROM tomcat:9.0-jdk21-temurin AS runtime
 
 LABEL org.opencontainers.image.title="SailPoint IdentityIQ 8.5" \
-      org.opencontainers.image.description="IdentityIQ 8.5 auf Tomcat 9 / OpenJDK 21 mit PostgreSQL" \
-      org.opencontainers.image.vendor="intern"
+      org.opencontainers.image.description="IdentityIQ 8.5 on Tomcat 9 / OpenJDK 21 with PostgreSQL" \
+      org.opencontainers.image.vendor="internal"
 
 ENV SPHOME=/usr/local/tomcat/webapps/identityiq \
     CATALINA_HOME=/usr/local/tomcat
 
-# gettext-base liefert envsubst, postgresql-client liefert pg_isready
-# (fuer das Warten auf die Datenbank im Init-Container).
+# gettext-base provides envsubst, postgresql-client provides pg_isready
+# (for the DB wait in the init container).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         gettext-base \
         postgresql-client \
  && rm -rf /var/lib/apt/lists/*
 
-# --- Alles Kleinteilige VOR dem grossen COPY -------------------------------
-# Reihenfolge ist hier wichtig fuer das Layer-Caching: die Webapp-Schicht
-# ist rund 1 GB gross. Laege sie vor den Skripten, wuerde jede Aenderung
-# am entrypoint.sh einen kompletten Neuaufbau dieser Schicht ausloesen.
+# --- Everything small BEFORE the big COPY ----------------------------------
+# Order matters for layer caching: the webapp layer is ~1 GB. If it came
+# before the scripts, every change to entrypoint.sh would trigger a full
+# rebuild of that layer.
 
-# UTF-8 am Connector. Ohne das kommt es bei Umlauten in Identity-Attributen
-# und URLs zu Fehldarstellungen - ein klassischer IIQ-Stolperstein.
+# UTF-8 on the connector. Without it, umlauts in identity attributes and
+# URLs render incorrectly - a classic IIQ pitfall.
 RUN sed -i 's|<Connector |<Connector URIEncoding="UTF-8" |g' \
         ${CATALINA_HOME}/conf/server.xml \
  && grep -c 'URIEncoding="UTF-8"' ${CATALINA_HOME}/conf/server.xml
 
-# Bequemer Zugriff auf die IIQ-Kommandozeile:
+# Convenient access to the IIQ command line:
 #   docker compose exec iiq iiq console
 RUN ln -sf ${SPHOME}/WEB-INF/bin/iiq /usr/local/bin/iiq \
  && printf '#!/bin/sh\nexec %s/WEB-INF/bin/iiq console "$@"\n' "${SPHOME}" \
         > /usr/local/bin/iiq-console \
  && chmod +x /usr/local/bin/iiq-console \
  && mkdir -p /data/objects /data/plugins /data/certs \
- && chown -R 1000:1000 /data ${CATALINA_HOME}
+ && chown -R 1000:1000 /data ${CATALINA_HOME} \
+ # The truststore must be writable by the app user, or the certificate
+ # import in entrypoint.sh fails. Temurin ships it root:root 0644 - that
+ # made every import a silent no-op. Only the file, not the JDK.
+ && chown 1000:1000 "${JAVA_HOME}/lib/security/cacerts"
 
 COPY --chmod=755 docker/iiq/entrypoint.sh   /opt/entrypoint.sh
 COPY --chmod=755 docker/iiq/healthcheck.sh  /opt/healthcheck.sh
 
-# --- Die grosse Schicht zuletzt -------------------------------------------
-# --chown vermeidet ein nachgelagertes "chown -R" ueber 8.984 Dateien,
-# das die komplette Schicht noch einmal duplizieren wuerde.
+# --- The big layer last ----------------------------------------------------
+# --chown avoids a trailing "chown -R" over 8,984 files, which would
+# duplicate the entire layer once more.
 COPY --from=extract --chown=1000:1000 /opt/iiq/identityiq ${SPHOME}
 
-# Non-root (Vorbild: Referenzprojekt D; die anderen drei laufen als root).
-# Die UID 1000 passt zum Standard-Benutzer vieler Linux-Hosts und
-# vermeidet Rechteprobleme bei Bind-Mounts.
+# Non-root (after reference project D; the other three run as root).
+# UID 1000 matches the default user on many Linux hosts and avoids
+# permission issues with bind mounts.
 RUN groupadd -g 1000 iiq 2>/dev/null || true \
  && useradd -u 1000 -g 1000 -d ${CATALINA_HOME} -s /bin/bash iiq 2>/dev/null || true
 USER 1000:1000

@@ -2,45 +2,151 @@
 <!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
 <!--
   ===========================================================================
-  Identitaetsattribute aus der HR-Quelle
+  Identity attributes from the HR source
   ===========================================================================
-  Legt fest, welche Attribute der HR-Applikation als Attribute der
-  Identitaet uebernommen werden.
+  Defines which attributes of the HR application are promoted to
+  attributes of the identity.
 
-  Ohne dieses Mapping bleiben die CSV-Spalten am Account haengen und sind
-  auf der Identitaet nicht sichtbar. Rollen und Populationen koennen dann
-  nicht darauf filtern.
+  Without this mapping the CSV columns stay on the account and are not
+  visible on the identity. Roles and populations cannot filter on them.
 
-  ACHTUNG - dies ist eine MERGE-Operation auf die bestehende
-  ObjectConfig:Identity. Ein vollstaendiges Ueberschreiben wuerde die von
-  IIQ mitgelieferten Attribute entfernen. Der ImportAction-Mechanismus
-  fuehrt die Definitionen zusammen; gleichnamige Attribute werden
-  ersetzt, alle uebrigen bleiben erhalten.
+  CAUTION: this is a MERGE operation on the existing
+  ObjectConfig:Identity. A full overwrite would remove the attributes
+  shipped with IIQ. The ImportAction mechanism merges the definitions;
+  attributes with the same name are replaced, all others are kept.
 
-  Attribute, auf die gefiltert werden soll, brauchen eine
-  extendedNumber. Erst damit legt IIQ eine eigene Spalte in
-  spt_identity an (extended1 bis extendedN); ohne sie landet der Wert
-  nur im XML-Blob und laesst sich nicht als Filterkriterium nutzen -
-  was die Rollenzuweisung ueber Selector aber braucht.
+  Attributes that are to be filtered on need an extendedNumber. Only then
+  does IIQ create a dedicated column in spt_identity (extended1 to
+  extendedN); without it the value lands only in the XML blob and cannot
+  be used as a filter criterion, which role assignment via Selector
+  requires.
 
-  Die Nummern muessen je Objekttyp eindeutig sein. In einer frischen
-  8.5-Installation ist noch keine vergeben, deshalb 1 bis 5.
+  The numbers must be unique per object type. A fresh 8.5 installation
+  has none assigned yet, hence 1 to 7 here.
 
-  Hinweis: Das in aelteren Beispielen verbreitete Attribut
-  searchable="true" gibt es in der 8.5-DTD NICHT - der Import
-  scheitert damit. Die gueltigen Attribute liefert in der Konsole:
+  Note: the attribute searchable="true", common in older examples, does
+  NOT exist in the 8.5 DTD; the import fails with it. The valid
+  attributes are listed in the console via:
       dtd /tmp/sailpoint.dtd
+
+  The rules referenced below ("HR Set Inactive") live in
+  12-Rules-Lifecycle.xml, which sorts before this file on purpose: the
+  merge resolves the RuleRef at import time.
   ===========================================================================
 -->
 <sailpoint>
 
   <ImportAction name='merge'>
     <ObjectConfig name="Identity">
+      <!--
+        The IIQ standard attributes (firstname, lastname, email,
+        displayName) exist in the shipped ObjectConfig but WITHOUT a
+        source. They are not filled by magic; every one of them needs an
+        AttributeSource pointing at the HR column, exactly like the
+        custom attributes below. standard="true" marks them as the
+        built-in columns of spt_identity rather than extended ones.
+
+        This block was missing at first, and the effect was drastic: all
+        HR identities had firstname/lastname/email NULL. Every create
+        policy field derived from them (LDAP sn is required) evaluated to
+        null, so the Provisioner opened a form for the missing value
+        instead of creating the account. 94 stuck forms, zero LDAP
+        accounts, no error anywhere.
+      -->
+      <ObjectAttribute displayName="att_first_name"
+                       name="firstname"
+                       standard="true"
+                       type="string">
+        <Description>First name from the HR source</Description>
+        <AttributeSource name="firstName">
+          <ApplicationRef>
+            <Reference class="sailpoint.object.Application" name="HR-Application"/>
+          </ApplicationRef>
+        </AttributeSource>
+      </ObjectAttribute>
+
+      <ObjectAttribute displayName="att_last_name"
+                       name="lastname"
+                       standard="true"
+                       type="string">
+        <Description>Last name from the HR source</Description>
+        <AttributeSource name="lastName">
+          <ApplicationRef>
+            <Reference class="sailpoint.object.Application" name="HR-Application"/>
+          </ApplicationRef>
+        </AttributeSource>
+      </ObjectAttribute>
+
+      <ObjectAttribute displayName="att_email"
+                       name="email"
+                       standard="true"
+                       type="string">
+        <Description>Business e-mail address from the HR source</Description>
+        <AttributeSource name="email">
+          <ApplicationRef>
+            <Reference class="sailpoint.object.Application" name="HR-Application"/>
+          </ApplicationRef>
+        </AttributeSource>
+      </ObjectAttribute>
+
+      <ObjectAttribute displayName="att_display_name"
+                       name="displayName"
+                       standard="true"
+                       type="string">
+        <Description>Display name from the HR source</Description>
+        <AttributeSource name="displayName">
+          <ApplicationRef>
+            <Reference class="sailpoint.object.Application" name="HR-Application"/>
+          </ApplicationRef>
+        </AttributeSource>
+      </ObjectAttribute>
+
+      <!--
+        manager is the least obvious of the standard attributes that
+        need a source. The managerCorrelationFilter on the HR application
+        only says HOW to resolve a value (identity whose employeeNumber
+        equals it); WHICH account column carries the value is this
+        source. Identitizer.promoteAttribute reads it and calls
+        correlateManager from promoteManager. Without it the hierarchy
+        stays empty, with no error anywhere. Two task options are needed
+        on top (noManagerCorrelation=false, alwaysRefreshManager=true;
+        see 24-TaskDefinitions.xml). Measured: 0 of 92 managers resolved
+        before all three were in place, 91 after (two HR rows share one
+        identity, see 20-Application-HR.xml).
+      -->
+      <ObjectAttribute displayName="att_manager"
+                       groupFactory="true"
+                       name="manager"
+                       standard="true"
+                       type="sailpoint.object.Identity">
+        <Description>Manager, resolved from the HR column managerEmployeeNumber</Description>
+        <AttributeSource name="managerEmployeeNumber">
+          <ApplicationRef>
+            <Reference class="sailpoint.object.Application" name="HR-Application"/>
+          </ApplicationRef>
+        </AttributeSource>
+      </ObjectAttribute>
+
+      <!--
+        Custom, not searchable: only read by the create policies (LDAP
+        telephoneNumber, JDBC Phone). No extendedNumber needed.
+      -->
+      <ObjectAttribute displayName="att_phone"
+                       name="phone"
+                       type="string">
+        <Description>Phone number from the HR source</Description>
+        <AttributeSource name="phone">
+          <ApplicationRef>
+            <Reference class="sailpoint.object.Application" name="HR-Application"/>
+          </ApplicationRef>
+        </AttributeSource>
+      </ObjectAttribute>
+
       <ObjectAttribute displayName="att_employee_number"
                        name="employeeNumber"
                        extendedNumber="1"
                        type="string">
-        <Description>Personalnummer aus der HR-Quelle</Description>
+        <Description>Employee number from the HR source</Description>
         <AttributeSource name="employeeNumber">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -52,7 +158,7 @@
                        name="department"
                        extendedNumber="2"
                        type="string">
-        <Description>Abteilung</Description>
+        <Description>Department</Description>
         <AttributeSource name="department">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -64,7 +170,7 @@
                        name="location"
                        extendedNumber="3"
                        type="string">
-        <Description>Standort</Description>
+        <Description>Location</Description>
         <AttributeSource name="location">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -75,7 +181,7 @@
       <ObjectAttribute displayName="att_cost_centre"
                        name="costCentre"
                        type="string">
-        <Description>Kostenstelle</Description>
+        <Description>Cost centre</Description>
         <AttributeSource name="costCentre">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -87,7 +193,7 @@
                        name="employeeType"
                        extendedNumber="4"
                        type="string">
-        <Description>Hierarchieebene: department-head, team-lead, staff</Description>
+        <Description>Hierarchy level: department-head, team-lead, staff</Description>
         <AttributeSource name="employeeType">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -98,7 +204,7 @@
       <ObjectAttribute displayName="att_job_title"
                        name="jobTitle"
                        type="string">
-        <Description>Funktionsbezeichnung</Description>
+        <Description>Job title</Description>
         <AttributeSource name="title">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -110,7 +216,7 @@
                        name="hrStatus"
                        extendedNumber="5"
                        type="string">
-        <Description>active oder inactive - steuert den Lifecycle</Description>
+        <Description>active or inactive, drives the lifecycle</Description>
         <AttributeSource name="status">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -122,7 +228,7 @@
                        name="startDate"
                        extendedNumber="6"
                        type="string">
-        <Description>Eintrittsdatum JJJJ-MM-TT</Description>
+        <Description>Start date YYYY-MM-DD</Description>
         <AttributeSource name="startDate">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -134,7 +240,7 @@
                        name="endDate"
                        extendedNumber="7"
                        type="string">
-        <Description>Austrittsdatum JJJJ-MM-TT, leer bei unbefristet</Description>
+        <Description>End date YYYY-MM-DD, empty for open-ended employment</Description>
         <AttributeSource name="endDate">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>
@@ -143,27 +249,27 @@
       </ObjectAttribute>
 
       <!--
-        inactive ist ein IIQ-Standardattribut, kein eigenes: es steuert,
-        ob sich eine Identitaet anmelden kann und ob sie in
-        Zertifizierungen auftaucht.
+        inactive is an IIQ standard attribute, not a custom one: it
+        controls whether an identity can log in and whether it appears in
+        certifications.
 
-        Statt es direkt aus einer Spalte zu uebernehmen, berechnet es
-        eine Regel aus den Datumsfeldern. Grund: Ein Austritt wirkt
-        auch dann, wenn die Quelle den status noch nicht nachgezogen
-        hat - der Stichtag entscheidet, nicht die Pflege in der Quelle.
+        Instead of taking it straight from a column, a rule computes it
+        from the date fields. Reason: a departure takes effect even if the
+        source has not yet updated the status; the cut-off date decides,
+        not the maintenance in the source.
 
-        WICHTIG: Die AttributeSource braucht eine ApplicationRef.
-        Eine reine RuleRef ohne Anwendungsbezug wird beim Refresh
-        nicht ausgewertet - die Regel liefert dann zwar beim direkten
-        Aufruf das richtige Ergebnis, wird aber nie aufgerufen.
-        Dasselbe Muster zeigt ein Export aus einer produktiven
-        8.5-Instanz (AppRule: ... mit ApplicationRef und RuleRef).
+        IMPORTANT: the AttributeSource needs an ApplicationRef. A bare
+        RuleRef without application context is not evaluated during
+        refresh; the rule returns the right result when called directly
+        but is never invoked. The same pattern appears in an export from
+        a productive 8.5 instance (AppRule: ... with ApplicationRef and
+        RuleRef).
       -->
       <ObjectAttribute displayName="att_inactive"
                        name="inactive"
                        standard="true"
                        type="boolean">
-        <Description>Gesperrt, sobald das Austrittsdatum erreicht ist</Description>
+        <Description>Locked as soon as the end date is reached</Description>
         <AttributeSource name="AppRule: HR Set Inactive">
           <ApplicationRef>
             <Reference class="sailpoint.object.Application" name="HR-Application"/>

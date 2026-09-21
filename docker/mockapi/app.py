@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
 # ===========================================================================
-# Mock-REST-API als Zielsystem fuer den Web-Services-Connector
+# Mock REST API as target system for the Web Services connector
 # ===========================================================================
-# Bildet eine typische Personalverwaltungs-API nach, wie sie der
-# WebServicesConnector anspricht:
+# Emulates a typical HR-management API as addressed by the
+# WebServicesConnector:
 #
-#   GET    /api/v1/users            Liste mit Paging
-#   GET    /api/v1/users/{id}       Einzelabruf
-#   POST   /api/v1/users            anlegen
-#   PATCH  /api/v1/users/{id}       aendern
-#   DELETE /api/v1/users/{id}       loeschen
-#   GET    /api/v1/groups           Gruppen (Entitlements)
-#   GET    /api/v1/health           Verbindungstest
+#   GET    /api/v1/users            list with paging
+#   GET    /api/v1/users/{id}       single fetch
+#   POST   /api/v1/users            create
+#   PATCH  /api/v1/users/{id}       update
+#   DELETE /api/v1/users/{id}       delete
+#   POST   /api/v1/users/{id}/roles         add one role  {"role": ...}
+#   DELETE /api/v1/users/{id}/roles/{role}  remove one role
+#   GET    /api/v1/groups           groups (entitlements)
+#   GET    /api/v1/health           connectivity test
 #
-# Bewusst KEIN SCIM: Der SCIM-Connector hat sein eigenes Zielsystem
-# (Container "scim"). Hier geht es um eine beliebige REST-Schnittstelle,
-# wie sie in Projekten am haeufigsten vorkommt - mit eigener
-# Datenstruktur, eigenem Paging und eigenem Fehlerformat.
+# Deliberately NOT SCIM: the SCIM connector has its own target system
+# (container "scim"). This is about an arbitrary REST interface as most
+# commonly seen in projects - with its own data structure, its own paging
+# and its own error format.
 #
-# Die Antwortstruktur ist absichtlich verschachtelt (data[], meta{}), weil
-# genau daran die Zuordnung im Connector haengt: rootPath muss darauf
-# zeigen. Eine flache Liste wuerde diesen Teil nicht pruefen.
+# The response structure is intentionally nested (data[], meta{}) because
+# that is exactly what the connector mapping hinges on: rootPath must
+# point at it. A flat list would not exercise that part.
 #
-# Authentifizierung wahlweise ueber Bearer-Token (API_TOKEN) oder
-# Basic Auth (BASIC_USER/BASIC_PASSWORD) - passend zu den beiden
-# gaengigen Werten von authenticationMethod im Connector:
-# "OAuthLogin" bzw. "BasicLogin".
+# Authentication via bearer token (API_TOKEN) or Basic Auth
+# (BASIC_USER/BASIC_PASSWORD) - matching the two common values of
+# authenticationMethod in the connector: "OAuthLogin" resp. "BasicLogin".
 #
-# Die Daten stammen aus derselben HR-CSV wie die anderen Zielsysteme -
-# die employeeNumber ist damit ueberall derselbe Korrelationsschluessel.
+# Data comes from the same HR CSV as the other target systems - so
+# employeeNumber is the same correlation key everywhere.
 # ===========================================================================
 import base64
 import csv
@@ -44,347 +45,417 @@ from urllib.parse import parse_qs, urlparse
 
 API_TOKEN = os.environ.get("API_TOKEN", "mocktoken")
 
-# Basic Auth als Alternative zum Token. Der Web-Services-Connector
-# beherrscht beides (authenticationMethod="BasicLogin" bzw.
-# "OAuthLogin"); der Mock akzeptiert deshalb beide Varianten, damit
-# sich die Anbindung umstellen laesst, ohne den Server anzufassen.
+# Basic Auth as alternative to the token. The Web Services connector
+# supports both (authenticationMethod="BasicLogin" resp. "OAuthLogin");
+# the mock accepts both so the integration can be switched without
+# touching the server.
 BASIC_USER = os.environ.get("BASIC_USER", "iiq")
 BASIC_PASSWORD = os.environ.get("BASIC_PASSWORD", "iiqpassword")
 PORT = int(os.environ.get("PORT", "8000"))
-CSV_PFAD = Path(os.environ.get("HR_CSV", "/data/hr/HR-people.csv"))
+CSV_PATH = Path(os.environ.get("HR_CSV", "/data/hr/HR-people.csv"))
 
-# Wie viele Personen aus der CSV als Bestandskonten uebernommen werden.
-# Wie bei LDAP und JDBC ist das Zielsystem fast leer - die uebrigen
-# Konten legt IdentityIQ selbst an.
-SEED_ANZAHL = int(os.environ.get("SEED_COUNT", "4"))
+# How many people from the CSV become seed accounts. As with LDAP and
+# JDBC, the target system is nearly empty - IdentityIQ creates the rest.
+SEED_LIMIT = int(os.environ.get("SEED_COUNT", "4"))
 
-# Vorgabe fuer die Seitengroesse. Bewusst klein, damit das Paging im
-# Connector auch bei wenigen Datensaetzen durchlaufen wird.
-DEFAULT_SEITE = 50
+# Default page size. Deliberately small so the connector's paging is
+# exercised even with few records.
+DEFAULT_PAGE_SIZE = 50
 
-_sperre = threading.Lock()
-_benutzer: dict[str, dict] = {}
-_gruppen: dict[str, dict] = {}
+_lock = threading.Lock()
+_users: dict[str, dict] = {}
+_groups: dict[str, dict] = {}
 
 
-def jetzt() -> str:
+def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def lade_startdaten() -> None:
+def load_seed_data() -> None:
     """
-    Liest die Bestandskonten aus der HR-CSV.
+    Reads the seed accounts from the HR CSV.
 
-    Faellt die Datei aus, startet der Dienst trotzdem - dann eben leer.
-    Ein Mock, der wegen fehlender Testdaten gar nicht hochkommt, waere
-    beim Debuggen hinderlich.
+    If the file is unavailable the service still starts - just empty.
+    A mock that fails to come up for lack of test data would hinder
+    debugging.
     """
-    gruppen = [
-        ("grp-portal-read",   "Portal: Lesezugriff"),
-        ("grp-portal-write",  "Portal: Schreibzugriff"),
-        ("grp-portal-admin",  "Portal: Administration"),
-        ("grp-reports",       "Auswertungen"),
-        ("grp-api-access",    "API-Zugriff"),
+    groups = [
+        ("grp-portal-read",   "Portal: read access"),
+        ("grp-portal-write",  "Portal: write access"),
+        ("grp-portal-admin",  "Portal: administration"),
+        ("grp-reports",       "Reports"),
+        ("grp-api-access",    "API access"),
     ]
-    for name, beschreibung in gruppen:
+    for name, description in groups:
         gid = str(uuid.uuid5(uuid.NAMESPACE_DNS, name))
-        _gruppen[gid] = {
+        _groups[gid] = {
             "id": gid,
             "name": name,
-            "description": beschreibung,
-            "createdAt": jetzt(),
+            "description": description,
+            "createdAt": now(),
         }
 
-    if not CSV_PFAD.is_file():
-        print(f"[mockapi] {CSV_PFAD} nicht gefunden - starte ohne Bestandskonten.")
+    if not CSV_PATH.is_file():
+        print(f"[mockapi] {CSV_PATH} not found - starting without seed accounts.")
         return
 
     try:
-        with CSV_PFAD.open(encoding="utf-8") as f:
-            zeilen = list(csv.DictReader(f, delimiter=";"))
+        with CSV_PATH.open(encoding="utf-8") as f:
+            rows = list(csv.DictReader(f, delimiter=";"))
     except (OSError, UnicodeDecodeError, csv.Error) as e:
-        print(f"[mockapi] {CSV_PFAD} nicht lesbar ({e}) - "
-              f"starte ohne Bestandskonten.")
+        print(f"[mockapi] {CSV_PATH} not readable ({e}) - "
+              f"starting without seed accounts.")
         return
 
-    # Nur aktive Personen als Bestandskonten, und nur die ersten paar.
-    aktive = [z for z in zeilen if z.get("status") == "active"]
-    uebersprungen = 0
-    for i, z in enumerate(aktive[:SEED_ANZAHL]):
-        # Fehlende oder leere Spalten duerfen den Start nicht verhindern.
-        # Der Docstring verspricht, dass der Dienst auch ohne Testdaten
-        # hochkommt - das muss auch fuer eine unvollstaendige Datei
-        # gelten, nicht nur fuer eine fehlende.
-        nummer = (z.get("employeeNumber") or "").strip()
-        mail = (z.get("email") or "").strip()
-        if not nummer:
-            uebersprungen += 1
+    # Only active people as seed accounts, and only the first few.
+    active = [r for r in rows if r.get("status") == "active"]
+    skipped = 0
+    for i, r in enumerate(active[:SEED_LIMIT]):
+        # Missing or empty columns must not prevent startup. The
+        # docstring promises the service comes up without test data -
+        # that must hold for an incomplete file, not just a missing one.
+        number = (r.get("employeeNumber") or "").strip()
+        mail = (r.get("email") or "").strip()
+        if not number:
+            skipped += 1
             continue
-        uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, nummer))
-        # Die ersten beiden bekommen mehr Rechte - damit die
-        # Entitlement-Aggregation etwas zu tun hat.
-        zugeordnet = ["grp-portal-read"]
+        uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, number))
+        # The first two get more permissions - so entitlement
+        # aggregation has something to do.
+        assigned = ["grp-portal-read"]
         if i == 0:
-            zugeordnet += ["grp-portal-admin", "grp-api-access", "grp-reports"]
+            assigned += ["grp-portal-admin", "grp-api-access", "grp-reports"]
         elif i == 1:
-            zugeordnet += ["grp-portal-write"]
+            assigned += ["grp-portal-write"]
 
-        _benutzer[uid] = {
+        _users[uid] = {
             "id": uid,
-            "employeeId": nummer,
-            "login": mail.split("@")[0] if "@" in mail else f"user{nummer}",
-            "firstName": z.get("firstName", ""),
-            "lastName": z.get("lastName", ""),
-            "fullName": z.get("displayName", ""),
+            "employeeId": number,
+            "login": mail.split("@")[0] if "@" in mail else f"user{number}",
+            "firstName": r.get("firstName", ""),
+            "lastName": r.get("lastName", ""),
+            "fullName": r.get("displayName", ""),
             "email": mail,
-            "jobTitle": z.get("title", ""),
-            "department": z.get("department", ""),
-            "office": z.get("location", ""),
+            "jobTitle": r.get("title", ""),
+            "department": r.get("department", ""),
+            "office": r.get("location", ""),
             "status": "ACTIVE",
-            "roles": zugeordnet,
-            "createdAt": jetzt(),
-            "updatedAt": jetzt(),
+            "roles": assigned,
+            "createdAt": now(),
+            "updatedAt": now(),
         }
 
-    hinweis = f", {uebersprungen} Zeile(n) uebersprungen" if uebersprungen else ""
-    print(f"[mockapi] {len(_benutzer)} Bestandskonten, "
-          f"{len(_gruppen)} Gruppen geladen{hinweis}.")
+    note = f", {skipped} row(s) skipped" if skipped else ""
+    print(f"[mockapi] Loaded {len(_users)} seed accounts, "
+          f"{len(_groups)} groups{note}.")
 
 
 class Handler(BaseHTTPRequestHandler):
 
-    # Die Standardausgabe des BaseHTTPRequestHandler geht auf stderr und
-    # ist unstrukturiert - hier eine knappe Zeile je Anfrage.
+    # BaseHTTPRequestHandler's default logging goes to stderr and is
+    # unstructured - one terse line per request instead.
     def log_message(self, format, *args):
-        # BaseHTTPRequestHandler ruft log_message auch aus log_error
-        # mit abweichender Signatur auf - args[1] gibt es dann nicht.
+        # BaseHTTPRequestHandler also calls log_message from log_error
+        # with a different signature - args[1] does not exist then.
         status = args[1] if len(args) > 1 else "-"
         print(f"[mockapi] {self.command} {self.path} -> {status}")
 
-    # -- Hilfsfunktionen --------------------------------------------------
+    # -- Helpers ----------------------------------------------------------
 
-    def _antwort(self, code: int, inhalt=None) -> None:
-        daten = b"" if inhalt is None else json.dumps(inhalt).encode("utf-8")
+    def _respond(self, code: int, payload=None) -> None:
+        data = b"" if payload is None else json.dumps(payload).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(daten)))
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        if daten:
-            self.wfile.write(daten)
+        if data:
+            self.wfile.write(data)
 
-    def _fehler(self, code: int, nachricht: str) -> None:
-        # Eigenes Fehlerformat - Web-Service-APIs haben selten dasselbe.
-        # Der Connector wertet den HTTP-Code aus, der Rumpf dient der
-        # Fehlersuche.
-        self._antwort(code, {
-            "error": {"code": code, "message": nachricht,
-                      "timestamp": jetzt()}
+    def _error(self, code: int, message: str) -> None:
+        # Custom error format - web-service APIs rarely share one.
+        # The connector evaluates the HTTP code; the body is for
+        # troubleshooting.
+        self._respond(code, {
+            "error": {"code": code, "message": message,
+                      "timestamp": now()}
         })
 
-    def _autorisiert(self) -> bool:
+    def _authorized(self) -> bool:
         """
-        Akzeptiert Bearer-Token UND Basic Auth.
+        Accepts bearer token AND Basic Auth.
 
-        So laesst sich die Applikation in IdentityIQ zwischen
-        authenticationMethod="OAuthLogin" und "BasicLogin" umstellen,
-        ohne den Mock neu zu konfigurieren.
+        Lets the IdentityIQ application switch between
+        authenticationMethod="OAuthLogin" and "BasicLogin" without
+        reconfiguring the mock.
         """
-        kopf = self.headers.get("Authorization", "")
+        header = self.headers.get("Authorization", "")
 
-        if kopf == f"Bearer {API_TOKEN}":
+        if header == f"Bearer {API_TOKEN}":
             return True
 
-        if kopf.startswith("Basic "):
+        if header.startswith("Basic "):
             try:
-                roh = base64.b64decode(kopf[6:]).decode("utf-8")
-                benutzer, _, passwort = roh.partition(":")
-                if benutzer == BASIC_USER and passwort == BASIC_PASSWORD:
+                raw = base64.b64decode(header[6:]).decode("utf-8")
+                user, _, password = raw.partition(":")
+                if user == BASIC_USER and password == BASIC_PASSWORD:
                     return True
             except (ValueError, UnicodeDecodeError):
                 pass
 
-        self._fehler(401, "Ungueltige oder fehlende Anmeldedaten")
+        self._error(401, "Invalid or missing credentials")
         return False
 
-    def _rumpf(self) -> dict | None:
-        laenge = int(self.headers.get("Content-Length") or 0)
-        if laenge == 0:
+    # Upper bound for request bodies. Anything a provisioning connector
+    # sends is a few hundred bytes; the cap only stops a runaway client
+    # from making the handler read gigabytes into memory.
+    MAX_BODY = 1024 * 1024
+
+    def _body(self) -> dict | None:
+        # Content-Length is client input: non-numeric would raise an
+        # uncaught ValueError (handler thread dies), negative would make
+        # rfile.read(-1) block until the peer hangs up.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._error(400, "Invalid Content-Length")
+            return None
+        if length < 0 or length > self.MAX_BODY:
+            self._error(413, f"Body exceeds {self.MAX_BODY} bytes")
+            return None
+        if length == 0:
             return {}
         try:
-            return json.loads(self.rfile.read(laenge).decode("utf-8"))
+            parsed = json.loads(self.rfile.read(length).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
-            self._fehler(400, "Rumpf ist kein gueltiges JSON")
+            self._error(400, "Body is not valid JSON")
             return None
+        # Callers use .get(); a JSON array or scalar would crash them.
+        if not isinstance(parsed, dict):
+            self._error(400, "Body must be a JSON object")
+            return None
+        return parsed
 
     @staticmethod
-    def _seite(elemente: list, query: dict) -> dict:
+    def _page(items: list, query: dict) -> dict:
         """
-        Baut eine Seite samt Metadaten.
+        Builds one page plus metadata.
 
-        offset/limit statt page/size: Beide Varianten kommen vor, der
-        Connector muss auf die jeweilige abgebildet werden. offset ist
-        hier die haeufigere.
+        offset/limit instead of page/size: both variants occur, the
+        connector has to be mapped to whichever one. offset is the more
+        common here.
         """
         try:
             offset = max(0, int(query.get("offset", ["0"])[0]))
         except ValueError:
             offset = 0
         try:
-            limit = int(query.get("limit", [str(DEFAULT_SEITE)])[0])
+            limit = int(query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0])
         except ValueError:
-            limit = DEFAULT_SEITE
+            limit = DEFAULT_PAGE_SIZE
         limit = max(1, min(limit, 200))
 
-        ausschnitt = elemente[offset:offset + limit]
+        chunk = items[offset:offset + limit]
         return {
-            "data": ausschnitt,
+            "data": chunk,
             "meta": {
-                "total": len(elemente),
+                "total": len(items),
                 "offset": offset,
                 "limit": limit,
-                "hasMore": (offset + limit) < len(elemente),
+                "hasMore": (offset + limit) < len(items),
             },
         }
 
-    # -- Endpunkte --------------------------------------------------------
+    # -- Endpoints --------------------------------------------------------
 
     def do_GET(self):
-        zerlegt = urlparse(self.path)
-        pfad = zerlegt.path.rstrip("/")
-        query = parse_qs(zerlegt.query)
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        query = parse_qs(parsed.query)
 
-        # Der Verbindungstest laeuft bewusst ohne Token: So laesst sich
-        # unterscheiden, ob der Dienst nicht erreichbar ist oder die
-        # Anmeldung scheitert.
-        if pfad == "/api/v1/health":
-            self._antwort(200, {"status": "UP", "time": jetzt()})
+        # The connectivity test deliberately needs no token: this
+        # distinguishes "service unreachable" from "authentication
+        # failed".
+        if path == "/api/v1/health":
+            self._respond(200, {"status": "UP", "time": now()})
             return
 
-        if not self._autorisiert():
+        if not self._authorized():
             return
 
-        if pfad == "/api/v1/users":
-            with _sperre:
-                alle = sorted(_benutzer.values(), key=lambda b: b["employeeId"])
-            self._antwort(200, self._seite(alle, query))
+        if path == "/api/v1/users":
+            with _lock:
+                items = sorted(_users.values(), key=lambda u: u["employeeId"])
+            self._respond(200, self._page(items, query))
             return
 
-        treffer = re.fullmatch(r"/api/v1/users/([^/]+)", pfad)
-        if treffer:
-            with _sperre:
-                b = _benutzer.get(treffer.group(1))
-            if b is None:
-                self._fehler(404, "Benutzer nicht gefunden")
+        match = re.fullmatch(r"/api/v1/users/([^/]+)", path)
+        if match:
+            with _lock:
+                user = _users.get(match.group(1))
+            if user is None:
+                self._error(404, "User not found")
             else:
-                self._antwort(200, b)
+                self._respond(200, user)
             return
 
-        if pfad == "/api/v1/groups":
-            with _sperre:
-                alle = sorted(_gruppen.values(), key=lambda g: g["name"])
-            self._antwort(200, self._seite(alle, query))
+        if path == "/api/v1/groups":
+            with _lock:
+                items = sorted(_groups.values(), key=lambda g: g["name"])
+            self._respond(200, self._page(items, query))
             return
 
-        self._fehler(404, f"Unbekannter Pfad: {pfad}")
+        self._error(404, f"Unknown path: {path}")
 
     def do_POST(self):
-        if not self._autorisiert():
+        if not self._authorized():
             return
-        pfad = urlparse(self.path).path.rstrip("/")
-        if pfad != "/api/v1/users":
-            self._fehler(404, f"Unbekannter Pfad: {pfad}")
+        if self._role_delta(add=True):
             return
-
-        rumpf = self._rumpf()
-        if rumpf is None:
+        path = urlparse(self.path).path.rstrip("/")
+        if path != "/api/v1/users":
+            self._error(404, f"Unknown path: {path}")
             return
 
-        for pflicht in ("login", "employeeId"):
-            if not rumpf.get(pflicht):
-                self._fehler(400, f"Pflichtfeld fehlt: {pflicht}")
+        body = self._body()
+        if body is None:
+            return
+
+        for required in ("login", "employeeId"):
+            if not body.get(required):
+                self._error(400, f"Missing required field: {required}")
                 return
 
-        with _sperre:
-            # employeeId ist der fachliche Schluessel und muss eindeutig
-            # bleiben - sonst korreliert IIQ spaeter mehrdeutig.
-            for b in _benutzer.values():
-                if b["employeeId"] == rumpf["employeeId"]:
-                    self._fehler(409, "employeeId bereits vergeben")
+        with _lock:
+            # employeeId is the business key and must stay unique -
+            # otherwise IIQ correlates ambiguously later.
+            for user in _users.values():
+                if user["employeeId"] == body["employeeId"]:
+                    self._error(409, "employeeId already taken")
                     return
 
             uid = str(uuid.uuid4())
-            neu = {
+            created = {
                 "id": uid,
-                "employeeId": rumpf["employeeId"],
-                "login": rumpf["login"],
-                "firstName": rumpf.get("firstName", ""),
-                "lastName": rumpf.get("lastName", ""),
-                "fullName": rumpf.get("fullName", ""),
-                "email": rumpf.get("email", ""),
-                "jobTitle": rumpf.get("jobTitle", ""),
-                "department": rumpf.get("department", ""),
-                "office": rumpf.get("office", ""),
-                "status": rumpf.get("status", "ACTIVE"),
-                "roles": rumpf.get("roles", []),
-                "createdAt": jetzt(),
-                "updatedAt": jetzt(),
+                "employeeId": body["employeeId"],
+                "login": body["login"],
+                "firstName": body.get("firstName", ""),
+                "lastName": body.get("lastName", ""),
+                "fullName": body.get("fullName", ""),
+                "email": body.get("email", ""),
+                "jobTitle": body.get("jobTitle", ""),
+                "department": body.get("department", ""),
+                "office": body.get("office", ""),
+                "status": body.get("status", "ACTIVE"),
+                "roles": body.get("roles", []),
+                "createdAt": now(),
+                "updatedAt": now(),
             }
-            _benutzer[uid] = neu
+            _users[uid] = created
 
-        self._antwort(201, neu)
+        self._respond(201, created)
+
+    # --- roles sub-resource: the delta path IIQ actually uses ------------
+    #
+    # IIQ's Modify sends Add/Remove of single values, never the full
+    # list. Mapped to "Add Entitlement" / "Remove Entitlement" endpoints
+    # in the Web Services application:
+    #   POST   /api/v1/users/{id}/roles           {"role": "grp-..."}
+    #   DELETE /api/v1/users/{id}/roles/{role}
+    # PATCH with {"roles": [...]} still replaces the whole list - that is
+    # the "Set" semantics and stays available for tests.
+    _ROLES_RE = re.compile(r"/api/v1/users/([^/]+)/roles(?:/([^/]+))?")
+
+    def _role_delta(self, add: bool) -> bool:
+        """Handles the roles sub-resource; returns False if the path is not it."""
+        match = self._ROLES_RE.fullmatch(urlparse(self.path).path.rstrip("/"))
+        if not match:
+            return False
+        user_id, role_in_path = match.group(1), match.group(2)
+        if add:
+            body = self._body()
+            if body is None:
+                return True
+            role = (body.get("role") or "").strip()
+        else:
+            role = role_in_path or ""
+        if not role:
+            self._error(400, "Missing role")
+            return True
+        with _lock:
+            user = _users.get(user_id)
+            if user is None:
+                self._error(404, "User not found")
+                return True
+            roles = list(user.get("roles") or [])
+            if add and role not in roles:
+                roles.append(role)
+            if not add and role in roles:
+                roles.remove(role)
+            user["roles"] = roles
+            user["updatedAt"] = now()
+            result = dict(user)
+        self._respond(200 if add else 200, result)
+        return True
 
     def do_PATCH(self):
-        if not self._autorisiert():
+        if not self._authorized():
             return
-        treffer = re.fullmatch(r"/api/v1/users/([^/]+)",
-                               urlparse(self.path).path.rstrip("/"))
-        if not treffer:
-            self._fehler(404, "Unbekannter Pfad")
-            return
-
-        rumpf = self._rumpf()
-        if rumpf is None:
+        match = re.fullmatch(r"/api/v1/users/([^/]+)",
+                             urlparse(self.path).path.rstrip("/"))
+        if not match:
+            self._error(404, "Unknown path")
             return
 
-        with _sperre:
-            b = _benutzer.get(treffer.group(1))
-            if b is None:
-                self._fehler(404, "Benutzer nicht gefunden")
+        body = self._body()
+        if body is None:
+            return
+
+        with _lock:
+            user = _users.get(match.group(1))
+            if user is None:
+                self._error(404, "User not found")
                 return
-            for schluessel, wert in rumpf.items():
-                # id und employeeId sind unveraenderlich: Ein Wechsel
-                # wuerde die Korrelation in IIQ brechen.
-                if schluessel in ("id", "employeeId", "createdAt"):
+            for key, value in body.items():
+                # id and employeeId are immutable: changing them would
+                # break correlation in IIQ.
+                if key in ("id", "employeeId", "createdAt"):
                     continue
-                b[schluessel] = wert
-            b["updatedAt"] = jetzt()
-            ergebnis = dict(b)
+                user[key] = value
+            user["updatedAt"] = now()
+            result = dict(user)
 
-        self._antwort(200, ergebnis)
+        self._respond(200, result)
 
     def do_DELETE(self):
-        if not self._autorisiert():
+        if not self._authorized():
             return
-        treffer = re.fullmatch(r"/api/v1/users/([^/]+)",
-                               urlparse(self.path).path.rstrip("/"))
-        if not treffer:
-            self._fehler(404, "Unbekannter Pfad")
+        if self._role_delta(add=False):
+            return
+        match = re.fullmatch(r"/api/v1/users/([^/]+)",
+                             urlparse(self.path).path.rstrip("/"))
+        if not match:
+            self._error(404, "Unknown path")
             return
 
-        with _sperre:
-            if _benutzer.pop(treffer.group(1), None) is None:
-                self._fehler(404, "Benutzer nicht gefunden")
+        with _lock:
+            if _users.pop(match.group(1), None) is None:
+                self._error(404, "User not found")
                 return
 
-        self._antwort(204)
+        self._respond(204)
 
 
 def main() -> None:
-    lade_startdaten()
+    load_seed_data()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"[mockapi] Lauscht auf Port {PORT}")
-    print(f"[mockapi]   Bearer-Token: {API_TOKEN}")
-    print(f"[mockapi]   Basic Auth:   {BASIC_USER} / {BASIC_PASSWORD}")
+    # Never print the secrets: this goes into `docker compose logs` and
+    # from there into every log export. (The same mistake, `cat
+    # iiq.properties` into the log, is what CLAUDE.md faults reference
+    # project C for.) The values are in .env.
+    print(f"[mockapi] Listening on port {PORT}")
+    print(f"[mockapi]   Bearer token: {'set' if API_TOKEN else 'EMPTY'}")
+    print(f"[mockapi]   Basic Auth:   user {BASIC_USER!r}, password "
+          f"{'set' if BASIC_PASSWORD else 'EMPTY'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

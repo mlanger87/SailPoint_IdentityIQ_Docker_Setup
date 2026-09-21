@@ -1,25 +1,25 @@
 -- ===========================================================================
--- search_path auf die IIQ-Schemata setzen
+-- Set search_path to the IIQ schemas
 -- ---------------------------------------------------------------------------
--- Die SailPoint-DDL legt die Tabellen NICHT in "public" ab, sondern in ein
--- gleichnamiges Schema (identityiq bzw. identityiqah). Der PostgreSQL-Default
--- fuer search_path ist aber "$user", public.
+-- SailPoint's DDL does NOT put the tables into "public" but into a schema
+-- of the same name (identityiq resp. identityiqah). PostgreSQL's default
+-- search_path, however, is "$user", public.
 --
--- Fuer IdentityIQ selbst geht das gerade noch gut, weil sich "$user" zum
--- Benutzernamen aufloest und dieser zufaellig genauso heisst wie das Schema.
--- Fuer alle anderen Zugriffe - Adminer, psql als postgres, eigene
--- Auswertungen - ist das Schema dagegen nicht im Suchpfad:
+-- For IdentityIQ itself this just about works, because "$user" resolves
+-- to the user name, which happens to equal the schema name. For every
+-- other access - DBGate, psql as postgres, ad-hoc queries - the schema is
+-- not on the search path:
 --
 --     SELECT * FROM spt_identity;          -- relation does not exist
---     SELECT * FROM identityiq.spt_identity;  -- funktioniert
+--     SELECT * FROM identityiq.spt_identity;  -- works
 --
--- Das ist unnoetig unbequem. Deshalb wird der Suchpfad hier dauerhaft pro
--- Rolle und Datenbank gesetzt.
+-- Needlessly inconvenient. So the search path is set persistently here
+-- per role and database.
 --
--- Laeuft als initdb-Hook NACH der Schema-DDL (Praefix 02).
+-- Runs as an initdb hook AFTER the schema DDL (prefix 02).
 -- ===========================================================================
 
--- Hauptdatenbank
+-- Main database
 ALTER ROLE identityiq IN DATABASE identityiq SET search_path TO identityiq, public;
 ALTER ROLE postgres   IN DATABASE identityiq SET search_path TO identityiq, public;
 
@@ -28,9 +28,9 @@ ALTER ROLE postgres   IN DATABASE identityiq SET search_path TO identityiq, publ
 ALTER ROLE identityiqah IN DATABASE identityiqah SET search_path TO identityiqah, public;
 ALTER ROLE postgres     IN DATABASE identityiqah SET search_path TO identityiqah, public;
 
--- Plugin-Datenbank
--- Hier liegen zunaechst keine Tabellen; die legt jedes Plugin bei seiner
--- Installation selbst an. Der Suchpfad wird trotzdem vorbereitet.
+-- Plugin database
+-- No tables here initially; each plugin creates its own on installation.
+-- The search path is prepared regardless.
 \connect "identityiqPlugin"
 ALTER ROLE "identityiqPlugin" IN DATABASE "identityiqPlugin" SET search_path TO "identityiqPlugin", public;
 ALTER ROLE postgres           IN DATABASE "identityiqPlugin" SET search_path TO "identityiqPlugin", public;
