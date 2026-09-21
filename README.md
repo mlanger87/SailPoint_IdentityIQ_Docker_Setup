@@ -111,6 +111,62 @@ Alle Dateien werden in **einem** Konsolenaufruf importiert (über ein generierte
 
 ZIP-Dateien nach `data/plugins/` legen, dann `.\scripts\iiq.ps1 import`.
 
+### LDAP-Testdaten
+
+Das Testverzeichnis enthält **100 Benutzer** und **50 Gruppen** mit 964
+Mitgliedschaften. Die Daten sind englisch gehalten, wie in realen Projekten üblich.
+
+| | |
+|---|---|
+| Basis-DN | `dc=example,dc=com` |
+| Benutzer | `ou=people` — Anmeldung mit `uid`, Passwort überall `password` |
+| Gruppen | `ou=groups` — `objectClass: groupOfNames` |
+
+Die Struktur ist auf IdentityIQ-Übungen hin angelegt:
+
+- **`employeeNumber`** (1001–1100) als eindeutiger Schlüssel für die Korrelationsregel
+- **`manager`** bildet eine dreistufige Hierarchie ab (Department Head → Team Lead →
+  Staff) — nötig, damit sich Manager-Zertifizierungen testen lassen
+- **`departmentNumber`**, **`l`**, **`employeeType`** als Merkmale für die Rollenzuordnung
+- Acht Abteilungen ungleich besetzt (Sales 22, IT 20 … Legal 4), drei Standorte
+
+Die Gruppen zerfallen in vier Arten:
+
+| Präfix | Beispiel | Zweck |
+|---|---|---|
+| `dept-*` | `dept-it` | Abteilung, vollständige Mitgliedschaft |
+| `site-*` | `site-london` | Standort |
+| `org-*` | `org-managers` | organisatorische Sammelgruppe |
+| `app-*` | `app-database-admin` | Anwendungsberechtigung (Entitlement) |
+
+Die `app-*`-Gruppen sind bewusst **ungleich groß** (2 bis 55 Mitglieder) und teilweise an
+Abteilungen gebunden — die Rechtsabteilung bekommt keinen Build-Server-Zugriff. Damit
+liefert eine Rollenmodellierung plausible Ergebnisse statt Rauschen.
+
+#### Datenmenge ändern
+
+Die LDIF-Dateien werden von einem Generator erzeugt:
+
+```powershell
+python scripts\generate-ldif.py --users 250 --groups 80
+```
+
+Ein fester Zufallsstartwert sorgt dafür, dass derselbe Aufruf immer dieselben Daten
+liefert. Die Dateien in `docker/openldap/ldif/` sollten **nicht** von Hand bearbeitet
+werden — der nächste Generatorlauf überschreibt sie.
+
+Danach das Verzeichnis neu aufbauen. Die LDIFs werden nur bei **leerem** Datenverzeichnis
+eingelesen, ein Neustart genügt also nicht:
+
+```powershell
+docker compose rm -sf openldap
+docker volume rm iiq85_ldapdata
+docker compose up -d openldap
+```
+
+Für einzelne Ergänzungen im laufenden Betrieb ist die LDAP-UI auf http://localhost:5080
+der schnellere Weg.
+
 ### Zertifikate hinterlegen
 
 `.cer`-, `.crt`- oder `.pem`-Dateien nach `data/certs/` legen. Sie werden beim nächsten
@@ -157,7 +213,7 @@ Tomcat wartet **nicht** auf den Debugger, startet also auch ohne IDE normal.
 | `iiq-init` | läuft **einmal**, importiert die Basiskonfiguration, beendet sich |
 | `iiq` | Tomcat 9 mit IdentityIQ, startet erst nach `iiq-init` |
 | `mailpit` | fängt alle Mails ab |
-| `openldap` | Testverzeichnis mit vier Benutzern und vier Gruppen |
+| `openldap` | Testverzeichnis mit 100 Benutzern und 50 Gruppen |
 | `ldap-ui` | Browser für das Testverzeichnis |
 | `dbgate` | Datenbank-Oberfläche mit SQL-Editor |
 

@@ -155,6 +155,49 @@ Die Mail-Konfiguration (`data/objects/10-Configuration-Mail.xml`) ändert nur ei
 Schlüssel der `SystemConfiguration`. Referenzprojekt A patcht stattdessen die `init.xml`
 per `sed` — das ist destruktiv und überlebt kein Upgrade.
 
+### Warum die LDAP-Testdaten generiert und nicht gepflegt werden
+
+`scripts/generate-ldif.py` erzeugt `02-users.ldif` und `03-groups.ldif`. Die Dateien sind
+**Artefakte** — sie liegen im Git, weil das LDAP sie beim Start braucht, aber geändert
+wird der Generator.
+
+Drei der vier Referenzprojekte setzen phpLDAPadmin ein und legen Testdaten von Hand über
+die Oberfläche an. Das skaliert nicht: Bei 100 Benutzern und 964 Mitgliedschaften wäre
+weder die Verteilung nachvollziehbar noch eine Änderung der Datenmenge praktikabel.
+
+Ein fester Zufallsstartwert (`SEED`) macht die Erzeugung reproduzierbar — derselbe Aufruf
+liefert dieselben Daten. Das ist nötig, damit ein neu aufgebautes Verzeichnis dieselben
+Korrelationsergebnisse liefert wie vorher; sonst wären IIQ-Testläufe nicht vergleichbar.
+
+Bei der Verteilung ging es um Brauchbarkeit, nicht um Größe:
+
+- **Dreistufige Hierarchie** über `manager` (Department Head → Team Lead → Staff). Eine
+  flache Liste hängt alle am selben Knoten, dann lässt sich keine Manager-Zertifizierung
+  testen.
+- **Ungleiche Gruppengrößen** (2 bis 55). Gleichverteilte Gruppen erzeugen bei der
+  Rollenmodellierung nur Rauschen.
+- **Abteilungsgebundene Gruppen** über `GROUP_DEPARTMENT_SCOPE` — Legal bekommt keinen
+  Build-Server-Zugriff.
+- **Privilegierte Gruppen** (`PRIVILEGED_GROUPS`) werden bevorzugt aus Führung und IT
+  besetzt.
+
+Ein Fallstrick beim Schreiben des Generators: Die Einschränkung auf privilegierte
+Kandidaten muss **vor** der Berechnung der Zielgröße greifen. Andernfalls wird erst aus
+allen Kandidaten eine Menge gezogen und danach auf die kleinere Gruppe reduziert — die
+sensiblen Gruppen schrumpfen dann auf ein bis zwei Mitglieder und taugen nicht mehr als
+Testdaten.
+
+Werte mit Sonderzeichen müssen nach RFC 2849 base64-kodiert werden (`cn:: <base64>`).
+`ldif_value()` erledigt das; ohne die Kodierung bricht der Import ab. Bei den jetzigen
+englischen Daten greift das nicht mehr, die Funktion bleibt aber für eigene Ergänzungen.
+
+Die LDIFs werden **nur bei leerem Datenverzeichnis** eingelesen
+(`LDAP_CUSTOM_LDIF_DIR=/ldifs`). Nach einer Änderung muss deshalb das Volume weg:
+
+```
+docker compose rm -sf openldap && docker volume rm iiq85_ldapdata && docker compose up -d openldap
+```
+
 ## Bekannte Fallstricke
 
 ### CRLF unter Windows

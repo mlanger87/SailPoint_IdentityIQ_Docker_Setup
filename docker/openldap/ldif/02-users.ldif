@@ -1,72 +1,2106 @@
 # ===========================================================================
 # Testbenutzer
 # ---------------------------------------------------------------------------
-# Passwort aller Konten: "password"
-# (userPassword ist base64-kodiert: cGFzc3dvcmQ= )
+# ERZEUGT von scripts/generate-ldif.py - Aenderungen hier gehen beim
+# naechsten Lauf verloren. Stattdessen den Generator anpassen.
 #
-# Die Attribute sind so gewaehlt, dass sich damit eine Korrelation gegen
-# IdentityIQ-Identitaeten ueben laesst (employeeNumber als eindeutiger
-# Schluessel, manager fuer die Hierarchie).
+# Anzahl: 100
+# Passwort aller Konten: "password"
+#
+# Die Attribute sind auf IdentityIQ-Uebungen hin gewaehlt:
+#   employeeNumber   eindeutiger Schluessel fuer die Korrelation
+#   manager          mehrstufige Hierarchie (Department Head, Team Lead)
+#   departmentNumber / l / employeeType  Merkmale fuer Rollenzuordnung
 # ===========================================================================
 
-dn: uid=mmustermann,ou=people,dc=example,dc=com
+dn: uid=udavis,ou=people,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: organizationalPerson
 objectClass: person
 objectClass: top
-uid: mmustermann
-cn: Max Mustermann
-sn: Mustermann
-givenName: Max
-mail: max.mustermann@example.com
+uid: udavis
+cn: Ursula Davis
+sn: Davis
+givenName: Ursula
+mail: ursula.davis@example.com
 employeeNumber: 1001
-title: Sachbearbeiter
-departmentNumber: Vertrieb
+title: Director
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: department-head
+telephoneNumber: +44 20 8135 1371
+description: Cost centre CC-1000
 userPassword:: cGFzc3dvcmQ=
 
-dn: uid=emusterfrau,ou=people,dc=example,dc=com
+dn: uid=gjenkins,ou=people,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: organizationalPerson
 objectClass: person
 objectClass: top
-uid: emusterfrau
-cn: Erika Musterfrau
-sn: Musterfrau
-givenName: Erika
-mail: erika.musterfrau@example.com
+uid: gjenkins
+cn: Grace Jenkins
+sn: Jenkins
+givenName: Grace
+mail: grace.jenkins@example.com
 employeeNumber: 1002
-title: Teamleitung
-departmentNumber: Vertrieb
+title: Team Lead
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 7806 9566
+description: Cost centre CC-1000
+manager: uid=udavis,ou=people,dc=example,dc=com
 userPassword:: cGFzc3dvcmQ=
 
-dn: uid=jschmidt,ou=people,dc=example,dc=com
+dn: uid=mcollins,ou=people,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: organizationalPerson
 objectClass: person
 objectClass: top
-uid: jschmidt
-cn: Jana Schmidt
-sn: Schmidt
-givenName: Jana
-mail: jana.schmidt@example.com
+uid: mcollins
+cn: Maria Collins
+sn: Collins
+givenName: Maria
+mail: maria.collins@example.com
 employeeNumber: 1003
-title: Administratorin
-departmentNumber: IT
-manager: uid=emusterfrau,ou=people,dc=example,dc=com
+title: Manager
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 8100 3755
+description: Cost centre CC-1000
+manager: uid=udavis,ou=people,dc=example,dc=com
 userPassword:: cGFzc3dvcmQ=
 
-dn: uid=tbecker,ou=people,dc=example,dc=com
+dn: uid=yharris,ou=people,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: organizationalPerson
 objectClass: person
 objectClass: top
-uid: tbecker
-cn: Tom Becker
-sn: Becker
-givenName: Tom
-mail: tom.becker@example.com
+uid: yharris
+cn: Yasmin Harris
+sn: Harris
+givenName: Yasmin
+mail: yasmin.harris@example.com
 employeeNumber: 1004
-title: Entwickler
+title: Associate
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6054 1523
+description: Cost centre CC-1000
+manager: uid=gjenkins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=kward,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: kward
+cn: Karen Ward
+sn: Ward
+givenName: Karen
+mail: karen.ward@example.com
+employeeNumber: 1005
+title: Analyst
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2043 3422
+description: Cost centre CC-1000
+manager: uid=gjenkins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ohughes,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ohughes
+cn: Olivia Hughes
+sn: Hughes
+givenName: Olivia
+mail: olivia.hughes@example.com
+employeeNumber: 1006
+title: Analyst
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3901 8513
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ajohnson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ajohnson
+cn: Andrew Johnson
+sn: Johnson
+givenName: Andrew
+mail: andrew.johnson@example.com
+employeeNumber: 1007
+title: Administrator
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 7189 6127
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=kjohnson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: kjohnson
+cn: Kevin Johnson
+sn: Johnson
+givenName: Kevin
+mail: kevin.johnson@example.com
+employeeNumber: 1008
+title: Analyst
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 4574 8400
+description: Cost centre CC-1000
+manager: uid=gjenkins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ffisher,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ffisher
+cn: Fiona Fisher
+sn: Fisher
+givenName: Fiona
+mail: fiona.fisher@example.com
+employeeNumber: 1009
+title: Officer
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 9830 5700
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=dmorgan,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: dmorgan
+cn: Daniel Morgan
+sn: Morgan
+givenName: Daniel
+mail: daniel.morgan@example.com
+employeeNumber: 1010
+title: Officer
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 8398 7182
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=tjenkins,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: tjenkins
+cn: Tina Jenkins
+sn: Jenkins
+givenName: Tina
+mail: tina.jenkins@example.com
+employeeNumber: 1011
+title: Officer
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5146 7728
+description: Cost centre CC-1000
+manager: uid=gjenkins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=cclark,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: cclark
+cn: Claire Clark
+sn: Clark
+givenName: Claire
+mail: claire.clark@example.com
+employeeNumber: 1012
+title: Analyst
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2255 5146
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ihall,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ihall
+cn: Isaac Hall
+sn: Hall
+givenName: Isaac
+mail: isaac.hall@example.com
+employeeNumber: 1013
+title: Associate
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 8007 9946
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=abrooks,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: abrooks
+cn: Alice Brooks
+sn: Brooks
+givenName: Alice
+mail: alice.brooks@example.com
+employeeNumber: 1014
+title: Specialist
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5872 6019
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=nbennett,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: nbennett
+cn: Nadine Bennett
+sn: Bennett
+givenName: Nadine
+mail: nadine.bennett@example.com
+employeeNumber: 1015
+title: Specialist
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5974 4302
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ojohnson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ojohnson
+cn: Oliver Johnson
+sn: Johnson
+givenName: Oliver
+mail: oliver.johnson@example.com
+employeeNumber: 1016
+title: Associate
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6106 1423
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=bcarter,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: bcarter
+cn: Beatrice Carter
+sn: Carter
+givenName: Beatrice
+mail: beatrice.carter@example.com
+employeeNumber: 1017
+title: Associate
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6120 7386
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=irichardson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: irichardson
+cn: Isaac Richardson
+sn: Richardson
+givenName: Isaac
+mail: isaac.richardson@example.com
+employeeNumber: 1018
+title: Specialist
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5299 3634
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wgraham,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wgraham
+cn: Walter Graham
+sn: Graham
+givenName: Walter
+mail: walter.graham@example.com
+employeeNumber: 1019
+title: Officer
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5238 8014
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=sedwards,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: sedwards
+cn: Sandra Edwards
+sn: Edwards
+givenName: Sandra
+mail: sandra.edwards@example.com
+employeeNumber: 1020
+title: Associate
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2873 1588
+description: Cost centre CC-1000
+manager: uid=gjenkins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lwright,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lwright
+cn: Laura Wright
+sn: Wright
+givenName: Laura
+mail: laura.wright@example.com
+employeeNumber: 1021
+title: Specialist
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5523 2638
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=acooper,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: acooper
+cn: Alice Cooper
+sn: Cooper
+givenName: Alice
+mail: alice.cooper@example.com
+employeeNumber: 1022
+title: Officer
+departmentNumber: Sales
+ou: Sales
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3822 6687
+description: Cost centre CC-1000
+manager: uid=mcollins,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=cwright,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: cwright
+cn: Charles Wright
+sn: Wright
+givenName: Charles
+mail: charles.wright@example.com
+employeeNumber: 1023
+title: Department Head
 departmentNumber: IT
-manager: uid=emusterfrau,ou=people,dc=example,dc=com
+ou: IT
+l: London
+employeeType: department-head
+telephoneNumber: +44 20 8273 6961
+description: Cost centre CC-2000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wgibson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wgibson
+cn: Walter Gibson
+sn: Gibson
+givenName: Walter
+mail: walter.gibson@example.com
+employeeNumber: 1024
+title: Team Lead
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 4384 5398
+description: Cost centre CC-2000
+manager: uid=cwright,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=tstewart,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: tstewart
+cn: Tina Stewart
+sn: Stewart
+givenName: Tina
+mail: tina.stewart@example.com
+employeeNumber: 1025
+title: Manager
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 9716 1147
+description: Cost centre CC-2000
+manager: uid=cwright,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wrobinson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wrobinson
+cn: Walter Robinson
+sn: Robinson
+givenName: Walter
+mail: walter.robinson@example.com
+employeeNumber: 1026
+title: Solution Architect
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3747 2674
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ecarter,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ecarter
+cn: Edward Carter
+sn: Carter
+givenName: Edward
+mail: edward.carter@example.com
+employeeNumber: 1027
+title: Database Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3254 3631
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=emarshall,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: emarshall
+cn: Emma Marshall
+sn: Marshall
+givenName: Emma
+mail: emma.marshall@example.com
+employeeNumber: 1028
+title: Database Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 8751 6112
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ymurphy,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ymurphy
+cn: Yasmin Murphy
+sn: Murphy
+givenName: Yasmin
+mail: yasmin.murphy@example.com
+employeeNumber: 1029
+title: Security Engineer
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 4772 7476
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=vrussell,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: vrussell
+cn: Vincent Russell
+sn: Russell
+givenName: Vincent
+mail: vincent.russell@example.com
+employeeNumber: 1030
+title: QA Engineer
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 7628 3499
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=fharris,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: fharris
+cn: Frank Harris
+sn: Harris
+givenName: Frank
+mail: frank.harris@example.com
+employeeNumber: 1031
+title: Solution Architect
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5596 3166
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=rsimmons,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: rsimmons
+cn: Rachel Simmons
+sn: Simmons
+givenName: Rachel
+mail: rachel.simmons@example.com
+employeeNumber: 1032
+title: System Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3339 1521
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=vturner,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: vturner
+cn: Victoria Turner
+sn: Turner
+givenName: Victoria
+mail: victoria.turner@example.com
+employeeNumber: 1033
+title: QA Engineer
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5498 2568
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=kmorgan,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: kmorgan
+cn: Karen Morgan
+sn: Morgan
+givenName: Karen
+mail: karen.morgan@example.com
+employeeNumber: 1034
+title: Solution Architect
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 9833 5276
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=oward,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: oward
+cn: Oliver Ward
+sn: Ward
+givenName: Oliver
+mail: oliver.ward@example.com
+employeeNumber: 1035
+title: Database Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 9852 8895
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=tkelly,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: tkelly
+cn: Thomas Kelly
+sn: Kelly
+givenName: Thomas
+mail: thomas.kelly@example.com
+employeeNumber: 1036
+title: Security Engineer
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3220 5191
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=emitchell,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: emitchell
+cn: Emma Mitchell
+sn: Mitchell
+givenName: Emma
+mail: emma.mitchell@example.com
+employeeNumber: 1037
+title: Solution Architect
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 3360 4441
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lgibson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lgibson
+cn: Laura Gibson
+sn: Gibson
+givenName: Laura
+mail: laura.gibson@example.com
+employeeNumber: 1038
+title: Solution Architect
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 8208 6776
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=vgraham,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: vgraham
+cn: Victoria Graham
+sn: Graham
+givenName: Victoria
+mail: victoria.graham@example.com
+employeeNumber: 1039
+title: Database Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2473 6662
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=csanders,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: csanders
+cn: Claire Sanders
+sn: Sanders
+givenName: Claire
+mail: claire.sanders@example.com
+employeeNumber: 1040
+title: System Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 7136 8009
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=nwalker,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: nwalker
+cn: Nadine Walker
+sn: Walker
+givenName: Nadine
+mail: nadine.walker@example.com
+employeeNumber: 1041
+title: Solution Architect
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2731 1997
+description: Cost centre CC-2000
+manager: uid=tstewart,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=acarter,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: acarter
+cn: Andrew Carter
+sn: Carter
+givenName: Andrew
+mail: andrew.carter@example.com
+employeeNumber: 1042
+title: Database Administrator
+departmentNumber: IT
+ou: IT
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2692 8088
+description: Cost centre CC-2000
+manager: uid=wgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=csanders2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: csanders2
+cn: Claire Sanders
+sn: Sanders
+givenName: Claire
+mail: claire.sanders@example.com
+employeeNumber: 1043
+title: Department Head
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: department-head
+telephoneNumber: +44 20 4961 1799
+description: Cost centre CC-3000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=sparker,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: sparker
+cn: Sandra Parker
+sn: Parker
+givenName: Sandra
+mail: sandra.parker@example.com
+employeeNumber: 1044
+title: Team Lead
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: team-lead
+telephoneNumber: +44 20 8254 1524
+description: Cost centre CC-3000
+manager: uid=csanders2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=igraham,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: igraham
+cn: Irene Graham
+sn: Graham
+givenName: Irene
+mail: irene.graham@example.com
+employeeNumber: 1045
+title: Manager
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: team-lead
+telephoneNumber: +44 20 9700 4204
+description: Cost centre CC-3000
+manager: uid=csanders2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=pthompson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: pthompson
+cn: Peter Thompson
+sn: Thompson
+givenName: Peter
+mail: peter.thompson@example.com
+employeeNumber: 1046
+title: Officer
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 9064 6691
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=medwards,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: medwards
+cn: Michael Edwards
+sn: Edwards
+givenName: Michael
+mail: michael.edwards@example.com
+employeeNumber: 1047
+title: Officer
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 4117 9226
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=hcollins,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: hcollins
+cn: Helen Collins
+sn: Collins
+givenName: Helen
+mail: helen.collins@example.com
+employeeNumber: 1048
+title: Associate
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 3843 9381
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=vmorgan,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: vmorgan
+cn: Vincent Morgan
+sn: Morgan
+givenName: Vincent
+mail: vincent.morgan@example.com
+employeeNumber: 1049
+title: Associate
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 8159 4342
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lhughes,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lhughes
+cn: Laura Hughes
+sn: Hughes
+givenName: Laura
+mail: laura.hughes@example.com
+employeeNumber: 1050
+title: Consultant
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 3622 2693
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wscott,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wscott
+cn: Walter Scott
+sn: Scott
+givenName: Walter
+mail: walter.scott@example.com
+employeeNumber: 1051
+title: Consultant
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 7884 3816
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ssanders,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ssanders
+cn: Sandra Sanders
+sn: Sanders
+givenName: Sandra
+mail: sandra.sanders@example.com
+employeeNumber: 1052
+title: Specialist
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 6017 9473
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=abrooks2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: abrooks2
+cn: Andrew Brooks
+sn: Brooks
+givenName: Andrew
+mail: andrew.brooks@example.com
+employeeNumber: 1053
+title: Administrator
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 4751 6094
+description: Cost centre CC-3000
+manager: uid=igraham,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=pcampbell,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: pcampbell
+cn: Peter Campbell
+sn: Campbell
+givenName: Peter
+mail: peter.campbell@example.com
+employeeNumber: 1054
+title: Specialist
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 8674 4657
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=pphillips,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: pphillips
+cn: Patricia Phillips
+sn: Phillips
+givenName: Patricia
+mail: patricia.phillips@example.com
+employeeNumber: 1055
+title: Coordinator
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 2677 4281
+description: Cost centre CC-3000
+manager: uid=igraham,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ihughes,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ihughes
+cn: Isaac Hughes
+sn: Hughes
+givenName: Isaac
+mail: isaac.hughes@example.com
+employeeNumber: 1056
+title: Consultant
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 3154 5329
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lfoster,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lfoster
+cn: Lucas Foster
+sn: Foster
+givenName: Lucas
+mail: lucas.foster@example.com
+employeeNumber: 1057
+title: Analyst
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 2146 3576
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lhayes,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lhayes
+cn: Laura Hayes
+sn: Hayes
+givenName: Laura
+mail: laura.hayes@example.com
+employeeNumber: 1058
+title: Administrator
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 2443 9635
+description: Cost centre CC-3000
+manager: uid=igraham,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wharris,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wharris
+cn: Walter Harris
+sn: Harris
+givenName: Walter
+mail: walter.harris@example.com
+employeeNumber: 1059
+title: Specialist
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 8648 1822
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ufisher,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ufisher
+cn: Ulrich Fisher
+sn: Fisher
+givenName: Ulrich
+mail: ulrich.fisher@example.com
+employeeNumber: 1060
+title: Consultant
+departmentNumber: Operations
+ou: Operations
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 7983 1390
+description: Cost centre CC-3000
+manager: uid=sparker,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=aphillips,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: aphillips
+cn: Andrew Phillips
+sn: Phillips
+givenName: Andrew
+mail: andrew.phillips@example.com
+employeeNumber: 1061
+title: Director
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: department-head
+telephoneNumber: +44 20 5372 7095
+description: Cost centre CC-4000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ebennett,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ebennett
+cn: Edward Bennett
+sn: Bennett
+givenName: Edward
+mail: edward.bennett@example.com
+employeeNumber: 1062
+title: Manager
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 4706 1163
+description: Cost centre CC-4000
+manager: uid=aphillips,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=igraham2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: igraham2
+cn: Irene Graham
+sn: Graham
+givenName: Irene
+mail: irene.graham@example.com
+employeeNumber: 1063
+title: Manager
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 4277 2454
+description: Cost centre CC-4000
+manager: uid=aphillips,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wcooper,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wcooper
+cn: Walter Cooper
+sn: Cooper
+givenName: Walter
+mail: walter.cooper@example.com
+employeeNumber: 1064
+title: Coordinator
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 7853 5022
+description: Cost centre CC-4000
+manager: uid=ebennett,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=usanders,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: usanders
+cn: Ursula Sanders
+sn: Sanders
+givenName: Ursula
+mail: ursula.sanders@example.com
+employeeNumber: 1065
+title: Consultant
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 4524 5077
+description: Cost centre CC-4000
+manager: uid=ebennett,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=emurphy,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: emurphy
+cn: Emma Murphy
+sn: Murphy
+givenName: Emma
+mail: emma.murphy@example.com
+employeeNumber: 1066
+title: Associate
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6965 3433
+description: Cost centre CC-4000
+manager: uid=ebennett,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wclark,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wclark
+cn: Walter Clark
+sn: Clark
+givenName: Walter
+mail: walter.clark@example.com
+employeeNumber: 1067
+title: Coordinator
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 7198 5662
+description: Cost centre CC-4000
+manager: uid=ebennett,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=zwatson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: zwatson
+cn: Zachary Watson
+sn: Watson
+givenName: Zachary
+mail: zachary.watson@example.com
+employeeNumber: 1068
+title: Consultant
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2486 8484
+description: Cost centre CC-4000
+manager: uid=igraham2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=kedwards,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: kedwards
+cn: Karen Edwards
+sn: Edwards
+givenName: Karen
+mail: karen.edwards@example.com
+employeeNumber: 1069
+title: Associate
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6200 2209
+description: Cost centre CC-4000
+manager: uid=igraham2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=sturner,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: sturner
+cn: Sandra Turner
+sn: Turner
+givenName: Sandra
+mail: sandra.turner@example.com
+employeeNumber: 1070
+title: Administrator
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6961 9771
+description: Cost centre CC-4000
+manager: uid=igraham2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=sedwards2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: sedwards2
+cn: Steven Edwards
+sn: Edwards
+givenName: Steven
+mail: steven.edwards@example.com
+employeeNumber: 1071
+title: Specialist
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 4966 1288
+description: Cost centre CC-4000
+manager: uid=igraham2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lwright2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lwright2
+cn: Lucas Wright
+sn: Wright
+givenName: Lucas
+mail: lucas.wright@example.com
+employeeNumber: 1072
+title: Consultant
+departmentNumber: Finance
+ou: Finance
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6964 8825
+description: Cost centre CC-4000
+manager: uid=igraham2,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=efoster,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: efoster
+cn: Edward Foster
+sn: Foster
+givenName: Edward
+mail: edward.foster@example.com
+employeeNumber: 1073
+title: Department Head
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: department-head
+telephoneNumber: +44 20 5939 3020
+description: Cost centre CC-5000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=xgibson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: xgibson
+cn: Xenia Gibson
+sn: Gibson
+givenName: Xenia
+mail: xenia.gibson@example.com
+employeeNumber: 1074
+title: Manager
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: team-lead
+telephoneNumber: +44 20 7347 4400
+description: Cost centre CC-5000
+manager: uid=efoster,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=hbrooks,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: hbrooks
+cn: Helen Brooks
+sn: Brooks
+givenName: Helen
+mail: helen.brooks@example.com
+employeeNumber: 1075
+title: Manager
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: team-lead
+telephoneNumber: +44 20 2853 2320
+description: Cost centre CC-5000
+manager: uid=efoster,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ghughes,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ghughes
+cn: George Hughes
+sn: Hughes
+givenName: George
+mail: george.hughes@example.com
+employeeNumber: 1076
+title: Specialist
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 3952 5820
+description: Cost centre CC-5000
+manager: uid=hbrooks,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=jturner,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: jturner
+cn: James Turner
+sn: Turner
+givenName: James
+mail: james.turner@example.com
+employeeNumber: 1077
+title: Associate
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 7092 6625
+description: Cost centre CC-5000
+manager: uid=hbrooks,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ssimmons,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ssimmons
+cn: Sandra Simmons
+sn: Simmons
+givenName: Sandra
+mail: sandra.simmons@example.com
+employeeNumber: 1078
+title: Officer
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 2529 7515
+description: Cost centre CC-5000
+manager: uid=xgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=vgibson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: vgibson
+cn: Victoria Gibson
+sn: Gibson
+givenName: Victoria
+mail: victoria.gibson@example.com
+employeeNumber: 1079
+title: Consultant
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 9428 5355
+description: Cost centre CC-5000
+manager: uid=xgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=mevans,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: mevans
+cn: Maria Evans
+sn: Evans
+givenName: Maria
+mail: maria.evans@example.com
+employeeNumber: 1080
+title: Administrator
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 2104 1437
+description: Cost centre CC-5000
+manager: uid=hbrooks,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ccampbell,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ccampbell
+cn: Charles Campbell
+sn: Campbell
+givenName: Charles
+mail: charles.campbell@example.com
+employeeNumber: 1081
+title: Officer
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 3362 3922
+description: Cost centre CC-5000
+manager: uid=xgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=jfoster,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: jfoster
+cn: James Foster
+sn: Foster
+givenName: James
+mail: james.foster@example.com
+employeeNumber: 1082
+title: Specialist
+departmentNumber: Human Resources
+ou: Human Resources
+l: Bristol
+employeeType: staff
+telephoneNumber: +44 20 8727 8952
+description: Cost centre CC-5000
+manager: uid=xgibson,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=jscott,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: jscott
+cn: James Scott
+sn: Scott
+givenName: James
+mail: james.scott@example.com
+employeeNumber: 1083
+title: Director
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: department-head
+telephoneNumber: +44 20 4021 5723
+description: Cost centre CC-6000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=xgraham,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: xgraham
+cn: Xenia Graham
+sn: Graham
+givenName: Xenia
+mail: xenia.graham@example.com
+employeeNumber: 1084
+title: Manager
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 3035 5551
+description: Cost centre CC-6000
+manager: uid=jscott,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=dyoung,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: dyoung
+cn: Daniel Young
+sn: Young
+givenName: Daniel
+mail: daniel.young@example.com
+employeeNumber: 1085
+title: Manager
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: team-lead
+telephoneNumber: +44 20 4974 9094
+description: Cost centre CC-6000
+manager: uid=jscott,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ievans,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ievans
+cn: Irene Evans
+sn: Evans
+givenName: Irene
+mail: irene.evans@example.com
+employeeNumber: 1086
+title: Specialist
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: staff
+telephoneNumber: +44 20 7995 2879
+description: Cost centre CC-6000
+manager: uid=dyoung,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=hsanders,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: hsanders
+cn: Helen Sanders
+sn: Sanders
+givenName: Helen
+mail: helen.sanders@example.com
+employeeNumber: 1087
+title: Associate
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2176 9147
+description: Cost centre CC-6000
+manager: uid=dyoung,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ucooper,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ucooper
+cn: Ulrich Cooper
+sn: Cooper
+givenName: Ulrich
+mail: ulrich.cooper@example.com
+employeeNumber: 1088
+title: Associate
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6454 4293
+description: Cost centre CC-6000
+manager: uid=dyoung,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=wharris2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: wharris2
+cn: Walter Harris
+sn: Harris
+givenName: Walter
+mail: walter.harris@example.com
+employeeNumber: 1089
+title: Coordinator
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: staff
+telephoneNumber: +44 20 5005 6473
+description: Cost centre CC-6000
+manager: uid=xgraham,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=dparker,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: dparker
+cn: Daniel Parker
+sn: Parker
+givenName: Daniel
+mail: daniel.parker@example.com
+employeeNumber: 1090
+title: Officer
+departmentNumber: Marketing
+ou: Marketing
+l: London
+employeeType: staff
+telephoneNumber: +44 20 2629 3866
+description: Cost centre CC-6000
+manager: uid=dyoung,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=imarshall,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: imarshall
+cn: Irene Marshall
+sn: Marshall
+givenName: Irene
+mail: irene.marshall@example.com
+employeeNumber: 1091
+title: Department Head
+departmentNumber: Procurement
+ou: Procurement
+l: Manchester
+employeeType: department-head
+telephoneNumber: +44 20 2104 1375
+description: Cost centre CC-7000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=iphillips,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: iphillips
+cn: Isaac Phillips
+sn: Phillips
+givenName: Isaac
+mail: isaac.phillips@example.com
+employeeNumber: 1092
+title: Associate
+departmentNumber: Procurement
+ou: Procurement
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 8037 2375
+description: Cost centre CC-7000
+manager: uid=imarshall,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=xevans,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: xevans
+cn: Xenia Evans
+sn: Evans
+givenName: Xenia
+mail: xenia.evans@example.com
+employeeNumber: 1093
+title: Analyst
+departmentNumber: Procurement
+ou: Procurement
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 8241 3604
+description: Cost centre CC-7000
+manager: uid=imarshall,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=itaylor,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: itaylor
+cn: Isaac Taylor
+sn: Taylor
+givenName: Isaac
+mail: isaac.taylor@example.com
+employeeNumber: 1094
+title: Specialist
+departmentNumber: Procurement
+ou: Procurement
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 5353 2763
+description: Cost centre CC-7000
+manager: uid=imarshall,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=zsimmons,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: zsimmons
+cn: Zachary Simmons
+sn: Simmons
+givenName: Zachary
+mail: zachary.simmons@example.com
+employeeNumber: 1095
+title: Analyst
+departmentNumber: Procurement
+ou: Procurement
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 3267 7453
+description: Cost centre CC-7000
+manager: uid=imarshall,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=shughes,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: shughes
+cn: Sandra Hughes
+sn: Hughes
+givenName: Sandra
+mail: sandra.hughes@example.com
+employeeNumber: 1096
+title: Administrator
+departmentNumber: Procurement
+ou: Procurement
+l: Manchester
+employeeType: staff
+telephoneNumber: +44 20 6284 3468
+description: Cost centre CC-7000
+manager: uid=imarshall,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=lfisher,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: lfisher
+cn: Lucas Fisher
+sn: Fisher
+givenName: Lucas
+mail: lucas.fisher@example.com
+employeeNumber: 1097
+title: Department Head
+departmentNumber: Legal
+ou: Legal
+l: London
+employeeType: department-head
+telephoneNumber: +44 20 9738 4951
+description: Cost centre CC-8000
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=dnelson,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: dnelson
+cn: Diana Nelson
+sn: Nelson
+givenName: Diana
+mail: diana.nelson@example.com
+employeeNumber: 1098
+title: Consultant
+departmentNumber: Legal
+ou: Legal
+l: London
+employeeType: staff
+telephoneNumber: +44 20 9432 4068
+description: Cost centre CC-8000
+manager: uid=lfisher,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=ffisher2,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: ffisher2
+cn: Frank Fisher
+sn: Fisher
+givenName: Frank
+mail: frank.fisher@example.com
+employeeNumber: 1099
+title: Associate
+departmentNumber: Legal
+ou: Legal
+l: London
+employeeType: staff
+telephoneNumber: +44 20 8527 1476
+description: Cost centre CC-8000
+manager: uid=lfisher,ou=people,dc=example,dc=com
+userPassword:: cGFzc3dvcmQ=
+
+dn: uid=kjenkins,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: kjenkins
+cn: Kevin Jenkins
+sn: Jenkins
+givenName: Kevin
+mail: kevin.jenkins@example.com
+employeeNumber: 1100
+title: Officer
+departmentNumber: Legal
+ou: Legal
+l: London
+employeeType: staff
+telephoneNumber: +44 20 6753 4997
+description: Cost centre CC-8000
+manager: uid=lfisher,ou=people,dc=example,dc=com
 userPassword:: cGFzc3dvcmQ=

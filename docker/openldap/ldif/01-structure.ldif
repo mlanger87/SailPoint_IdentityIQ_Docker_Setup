@@ -6,13 +6,16 @@
 # Wird beim ersten Start von bitnami/openldap eingelesen
 # (LDAP_CUSTOM_LDIF_DIR=/ldifs). Die Dateien werden alphabetisch
 # verarbeitet, daher die Nummernpraefixe.
+#
+# Die Daten selbst sind englisch gehalten, wie in realen
+# IdentityIQ-Projekten ueblich.
 # ===========================================================================
 
 dn: dc=example,dc=com
 objectClass: top
 objectClass: dcObject
 objectClass: organization
-o: Example Organisation
+o: Example Corporation
 dc: example
 
 dn: ou=people,dc=example,dc=com
