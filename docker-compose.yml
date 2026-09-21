@@ -168,12 +168,20 @@ services:
   # -------------------------------------------------------------------------
   # OpenLDAP - Testverzeichnis fuer Aggregation und Provisionierung
   #
-  # bitnami/openldap statt osixia/openldap: letzteres wird seit Jahren
-  # nicht mehr gepflegt, wird aber von drei der vier Referenzprojekte
-  # verwendet.
+  # Zur Image-Wahl: Ein offizielles OpenLDAP-Image gibt es nicht.
+  #   - osixia/openldap (in drei der vier Referenzprojekte verwendet)
+  #     wird seit Jahren nicht mehr gepflegt; letzter Stand 1.5.0.
+  #   - bitnami/openldap wurde 2025 nach bitnamilegacy verschoben und
+  #     bekommt dort keine Updates mehr, ist aber inhaltlich aktuell
+  #     (OpenLDAP 2.6.10 auf Debian 12).
+  #
+  # Fuer ein lokales Testverzeichnis ist der eingefrorene Stand
+  # vertretbar - der Dienst ist nicht nach aussen exponiert. Fuer
+  # produktionsnahe Umgebungen waere ein selbst gebautes Image oder
+  # ein echtes Verzeichnis vorzuziehen.
   # -------------------------------------------------------------------------
   openldap:
-    image: bitnami/openldap:2.6
+    image: bitnamilegacy/openldap:2.6.10-debian-12-r4
     container_name: iiq-openldap
     environment:
       LDAP_ROOT: ${LDAP_ROOT:-dc=example,dc=com}
