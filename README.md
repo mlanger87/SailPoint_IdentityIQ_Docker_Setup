@@ -62,7 +62,7 @@ Spätere Starts dauern etwa eine Minute.
 |---|---|---|
 | **IdentityIQ** | http://localhost:8080/identityiq | `spadmin` / `admin` |
 | **Mailpit** (Mailfang) | http://localhost:8025 | — |
-| **Adminer** (Datenbank) | http://localhost:5050 | System `PostgreSQL`, Server `postgres`, `identityiq` / `identityiq` |
+| **DBGate** (Datenbank) | http://localhost:5050 | — (drei Verbindungen sind vorkonfiguriert) |
 | PostgreSQL | `localhost:5432` | `identityiq` / `identityiq` |
 | OpenLDAP | `localhost:1389` | `cn=admin,dc=example,dc=com` / `adminpassword` |
 
@@ -157,7 +157,7 @@ Tomcat wartet **nicht** auf den Debugger, startet also auch ohne IDE normal.
 | `iiq` | Tomcat 9 mit IdentityIQ, startet erst nach `iiq-init` |
 | `mailpit` | fängt alle Mails ab |
 | `openldap` | Testverzeichnis mit vier Benutzern und vier Gruppen |
-| `adminer` | Weboberfläche für die Datenbank |
+| `dbgate` | Datenbank-Oberfläche mit SQL-Editor |
 
 Die Trennung von `iiq-init` und `iiq` sorgt dafür, dass der Import genau einmal läuft.
 Ein erneuter Init-Lauf erkennt am Datenbankzustand, dass bereits initialisiert wurde, und
@@ -188,22 +188,13 @@ docker compose logs iiq-init
 
 Der Init-Container muss sich mit Code 0 beenden. `iiq` startet sonst gar nicht erst.
 
-### Adminer zeigt keine Tabellen
+### Die Datenbank-Oberfläche zeigt keine Tabellen
 
-Zwei mögliche Ursachen:
+Die IIQ-Tabellen liegen nicht im Standard-Schema `public`, sondern in einem gleichnamigen
+Schema `identityiq`. DBGate wählt das richtige Schema automatisch; bei anderen Werkzeugen
+muss man es ggf. von `public` auf `identityiq` umstellen.
 
-**Auf der Übersichtsseite** („Select database") steht bei „Tables" und „Size" nur `?`.
-Das ist normal — Adminer zählt diese Werte erst auf Klick („Compute").
-
-**Nach dem Öffnen einer Datenbank** ist die Liste leer: Die IIQ-Tabellen liegen nicht im
-Standard-Schema `public`, sondern in einem gleichnamigen Schema `identityiq`. Oben in der
-Schema-Auswahl von `public` auf `identityiq` umstellen — oder direkt aufrufen:
-
-```
-http://localhost:5050/?pgsql=postgres&username=postgres&db=identityiq&ns=identityiq
-```
-
-Für Abfragen ist das nicht nötig: Der `search_path` ist so gesetzt, dass
+Für Abfragen spielt das keine Rolle — der `search_path` ist so gesetzt, dass
 `SELECT * FROM spt_identity` auch ohne Präfix funktioniert.
 
 ### Port bereits belegt

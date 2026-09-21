@@ -91,7 +91,7 @@ die Tabellen legt jedes Plugin bei seiner Installation selbst an. Das ist kein F
 `"$user", public`.
 
 Für IIQ selbst geht das gerade noch gut, weil sich `"$user"` zum Benutzernamen auflöst und
-dieser zufällig genauso heißt wie das Schema. Für alle anderen Zugriffe — Adminer, `psql`
+dieser zufällig genauso heißt wie das Schema. Für alle anderen Zugriffe — DBGate, `psql`
 als `postgres`, eigene Auswertungen — ist das Schema dagegen nicht im Suchpfad:
 
 ```sql
@@ -103,8 +103,7 @@ Deshalb setzt `docker/postgres/02-search-path.sql` den Suchpfad dauerhaft pro Ro
 Datenbank (`ALTER ROLE ... IN DATABASE ... SET search_path`). Danach funktionieren
 Abfragen ohne Schema-Präfix.
 
-In Adminer zeigt die Datenbankübersicht bei „Tables" und „Size" nur `?` — das ist Absicht,
-die Werte werden erst auf Klick („Compute") ermittelt.
+DBGate wählt das Schema von sich aus richtig und zeigt direkt alle 220 Tabellen.
 
 ### Größenverhältnisse
 
@@ -219,8 +218,13 @@ mit:
 docker manifest inspect <image> | grep '"architecture"'
 ```
 
-Bei pgAdmin half auch das nicht — es wurde deshalb durch **Adminer** ersetzt, das für den
-Zweck (SQL auf die `spt_*`-Tabellen) ohnehin schlanker ist.
+Bei pgAdmin half auch das nicht. Als Datenbank-Oberfläche wird deshalb **DBGate**
+verwendet (`amd64` steht dort im Manifest an erster Stelle). Die drei Verbindungen werden
+über `CONNECTIONS` und `LABEL_*`/`SERVER_*`/`USER_*`-Variablen vorkonfiguriert, es muss
+also nichts manuell angelegt werden.
+
+Zwischenzeitlich war Adminer im Einsatz — technisch einwandfrei, optisch aber sehr
+altbacken.
 
 ### Nach einem Umzug des Docker-Datenverzeichnisses
 

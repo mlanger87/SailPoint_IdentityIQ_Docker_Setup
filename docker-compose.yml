@@ -203,26 +203,56 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # Adminer - Blick in die IIQ-Datenbank
+  # DBGate - Datenbank-Oberflaeche
   #
-  # Urspruenglich war hier pgAdmin vorgesehen. Dessen Image liefert auf
-  # diesem Host jedoch dauerhaft die falsche Architektur-Variante
-  # ("exec /entrypoint.sh: exec format error"), auch mit erzwungener
-  # platform-Angabe und ueber mehrere Tags hinweg.
+  # Zur Werkzeugwahl:
+  #   - pgAdmin schied aus: dessen Image liefert auf diesem Host die
+  #     arm64-Variante ("exec format error"), auch mit erzwungener
+  #     platform-Angabe und ueber mehrere Tags hinweg.
+  #   - Adminer lief technisch einwandfrei, ist optisch aber sehr
+  #     altbacken.
+  #   - DBGate: modernes Interface, SQL-Editor mit Autovervollstaendigung,
+  #     Tabellen-Editor, Daten-Export. Die Verbindungen werden ueber
+  #     CONNECTIONS vorkonfiguriert, es ist also kein manuelles Anlegen
+  #     noetig.
   #
-  # Adminer ist fuer den Zweck ohnehin passender: ein einzelnes
-  # PHP-Werkzeug ohne eigene Benutzerverwaltung, startet in Sekunden
-  # und genuegt voellig, um in den spt_*-Tabellen zu stoebern.
+  # Die Datenbanken werden bewusst einzeln eingetragen, damit alle drei
+  # in der Seitenleiste erscheinen.
   # -------------------------------------------------------------------------
-  adminer:
-    image: adminer:5
+  dbgate:
+    image: dbgate/dbgate:7.3.0
     platform: linux/amd64
-    container_name: iiq-adminer
+    container_name: iiq-dbgate
     environment:
-      ADMINER_DEFAULT_SERVER: postgres
-      ADMINER_DESIGN: dracula
+      CONNECTIONS: iiq,plugin,ah
+
+      LABEL_iiq: IdentityIQ
+      SERVER_iiq: postgres
+      PORT_iiq: "5432"
+      USER_iiq: ${IIQ_DB_USER:-identityiq}
+      PASSWORD_iiq: ${IIQ_DB_PASSWORD:-identityiq}
+      DATABASE_iiq: identityiq
+      ENGINE_iiq: postgres@dbgate-plugin-postgres
+
+      LABEL_plugin: IdentityIQ Plugins
+      SERVER_plugin: postgres
+      PORT_plugin: "5432"
+      USER_plugin: ${IIQ_PLUGIN_DB_USER:-identityiqPlugin}
+      PASSWORD_plugin: ${IIQ_PLUGIN_DB_PASSWORD:-identityiqPlugin}
+      DATABASE_plugin: identityiqPlugin
+      ENGINE_plugin: postgres@dbgate-plugin-postgres
+
+      LABEL_ah: IdentityIQ Access History
+      SERVER_ah: postgres
+      PORT_ah: "5432"
+      USER_ah: ${IIQ_AH_DB_USER:-identityiqah}
+      PASSWORD_ah: ${IIQ_AH_DB_PASSWORD:-identityiqah}
+      DATABASE_ah: identityiqah
+      ENGINE_ah: postgres@dbgate-plugin-postgres
     ports:
-      - "${ADMINER_PORT:-5050}:8080"
+      - "${DBGATE_PORT:-5050}:3000"
+    volumes:
+      - dbgatedata:/root/.dbgate
     depends_on:
       postgres:
         condition: service_healthy
@@ -236,4 +266,5 @@ networks:
 volumes:
   pgdata:
   ldapdata:
+  dbgatedata:
 
