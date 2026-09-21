@@ -62,7 +62,7 @@ Spätere Starts dauern etwa eine Minute.
 |---|---|---|
 | **IdentityIQ** | http://localhost:8080/identityiq | `spadmin` / `admin` |
 | **Mailpit** (Mailfang) | http://localhost:8025 | — |
-| **pgAdmin** | http://localhost:5050 | `admin@local.dev` / `admin` |
+| **Adminer** (Datenbank) | http://localhost:5050 | System `PostgreSQL`, Server `postgres`, `identityiq` / `identityiq` |
 | PostgreSQL | `localhost:5432` | `identityiq` / `identityiq` |
 | OpenLDAP | `localhost:1389` | `cn=admin,dc=example,dc=com` / `adminpassword` |
 
@@ -157,7 +157,7 @@ Tomcat wartet **nicht** auf den Debugger, startet also auch ohne IDE normal.
 | `iiq` | Tomcat 9 mit IdentityIQ, startet erst nach `iiq-init` |
 | `mailpit` | fängt alle Mails ab |
 | `openldap` | Testverzeichnis mit vier Benutzern und vier Gruppen |
-| `pgadmin` | Weboberfläche für die Datenbank |
+| `adminer` | Weboberfläche für die Datenbank |
 
 Die Trennung von `iiq-init` und `iiq` sorgt dafür, dass der Import genau einmal läuft.
 Ein erneuter Init-Lauf erkennt am Datenbankzustand, dass bereits initialisiert wurde, und

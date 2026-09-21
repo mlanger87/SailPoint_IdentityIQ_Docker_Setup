@@ -27,7 +27,7 @@ info()  { printf '         %s\n' "$1"; }
 # ---------------------------------------------------------------------------
 step "1. Container"
 # ---------------------------------------------------------------------------
-for svc in postgres iiq mailpit openldap pgadmin; do
+for svc in postgres iiq mailpit openldap adminer; do
     cid="$(docker compose ps -q "${svc}" 2>/dev/null)"
     if [ -z "${cid}" ]; then
         fail "${svc}: laeuft nicht"

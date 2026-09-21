@@ -97,7 +97,7 @@ $ports = @{
     'IdentityIQ' = 8080
     'PostgreSQL' = 5432
     'Mailpit'    = 8025
-    'pgAdmin'    = 5050
+    'Adminer'    = 5050
     'OpenLDAP'   = 1389
 }
 
@@ -151,7 +151,7 @@ Write-Host ""
 Write-Host "  Nach dem Start erreichbar:" -ForegroundColor White
 Write-Host "      IdentityIQ   http://localhost:8080/identityiq   (spadmin / admin)"
 Write-Host "      Mailpit      http://localhost:8025"
-Write-Host "      pgAdmin      http://localhost:5050"
+Write-Host "      Adminer      http://localhost:5050"
 Write-Host ""
 Write-Host "  Der erste Start dauert mehrere Minuten - die Datenbank wird" -ForegroundColor Gray
 Write-Host "  angelegt und die Basiskonfiguration importiert." -ForegroundColor Gray

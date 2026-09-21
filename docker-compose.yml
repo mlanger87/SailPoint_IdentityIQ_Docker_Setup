@@ -150,6 +150,11 @@ services:
   # -------------------------------------------------------------------------
   mailpit:
     image: axllent/mailpit:v1.21
+    # platform explizit setzen: Das Manifest dieses Images listet linux/386
+    # VOR linux/amd64. Mit dem containerd-Image-Store waehlt Docker sonst
+    # die 386-Variante, deren 32-Bit-Binaries im Container mit
+    # "exec /mailpit: exec format error" scheitern.
+    platform: linux/amd64
     container_name: iiq-mailpit
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "1"
@@ -198,22 +203,26 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # pgAdmin - Blick in die IIQ-Datenbank
+  # Adminer - Blick in die IIQ-Datenbank
+  #
+  # Urspruenglich war hier pgAdmin vorgesehen. Dessen Image liefert auf
+  # diesem Host jedoch dauerhaft die falsche Architektur-Variante
+  # ("exec /entrypoint.sh: exec format error"), auch mit erzwungener
+  # platform-Angabe und ueber mehrere Tags hinweg.
+  #
+  # Adminer ist fuer den Zweck ohnehin passender: ein einzelnes
+  # PHP-Werkzeug ohne eigene Benutzerverwaltung, startet in Sekunden
+  # und genuegt voellig, um in den spt_*-Tabellen zu stoebern.
   # -------------------------------------------------------------------------
-  pgadmin:
-    image: dpage/pgadmin4:8.14
-    container_name: iiq-pgadmin
+  adminer:
+    image: adminer:5
+    platform: linux/amd64
+    container_name: iiq-adminer
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      # Kein Master-Passwort-Dialog bei jedem Start.
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
-      PGADMIN_CONFIG_SERVER_MODE: "False"
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: dracula
     ports:
-      - "${PGADMIN_PORT:-5050}:80"
-    volumes:
-      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
-      - pgadmindata:/var/lib/pgadmin
+      - "${ADMINER_PORT:-5050}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -227,4 +236,4 @@ networks:
 volumes:
   pgdata:
   ldapdata:
-  pgadmindata:
+

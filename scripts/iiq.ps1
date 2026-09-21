@@ -48,7 +48,7 @@ try {
             Write-Host "Erreichbar unter:" -ForegroundColor White
             Write-Host "  IdentityIQ   http://localhost:8080/identityiq   (spadmin / admin)"
             Write-Host "  Mailpit      http://localhost:8025"
-            Write-Host "  pgAdmin      http://localhost:5050"
+            Write-Host "  Adminer      http://localhost:5050"
         }
 
         'psql' {

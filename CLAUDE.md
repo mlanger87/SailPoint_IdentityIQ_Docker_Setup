@@ -178,6 +178,40 @@ solche Auswertung.
 
 `import init.xml` muss **vor** `iiq patch` laufen. Umgekehrt schlägt der Patch fehl.
 
+### `exec format error` bei Fremd-Images — `platform` setzen
+
+Mit dem **containerd-Image-Store** (`Storage Driver: overlayfs`,
+`io.containerd.snapshotter.v1`) wählt Docker bei Multi-Arch-Images nicht zuverlässig die
+Host-Architektur, sondern offenbar den **ersten Eintrag im Manifest**. Steht dort
+`linux/386` oder `linux/arm64` vor `linux/amd64`, startet der Container mit
+`exec /<binary>: exec format error`.
+
+Tückisch dabei: `docker image inspect` meldet trotzdem `Architecture: amd64` — die Angabe
+stammt aus den Manifest-Metadaten, nicht aus den tatsächlichen Layern. Auch ein
+`docker pull --platform linux/amd64` half nicht zuverlässig.
+
+Betroffen waren `axllent/mailpit` (386 zuerst) und `dpage/pgadmin4` (arm64 zuerst).
+
+Abhilfe: `platform: linux/amd64` im Service eintragen. Prüfen lässt sich die Reihenfolge
+mit:
+
+```bash
+docker manifest inspect <image> | grep '"architecture"'
+```
+
+Bei pgAdmin half auch das nicht — es wurde deshalb durch **Adminer** ersetzt, das für den
+Zweck (SQL auf die `spt_*`-Tabellen) ohnehin schlanker ist.
+
+### Nach einem Umzug des Docker-Datenverzeichnisses
+
+Ein Verschieben des Docker-Data-Root von `C:` nach `E:` hat Images und Volumes hier
+vollständig erhalten — inklusive `iiq85_pgdata` mit dem initialisierten Schema. Der
+Neuaufbau war nicht nötig.
+
+Die angezeigte Image-Größe kann danach abweichen (`iiq-app` zeigte statt 1,73 GB plötzlich
+4,24 GB), weil geteilte Basis-Layer neu gezählt werden. Das ist ein Anzeigeeffekt, kein
+echter Mehrverbrauch.
+
 ### Verwaiste Container blockieren den Namen
 
 Nach abgebrochenen Läufen kann Docker Desktop einen Eintrag behalten, der weder über den

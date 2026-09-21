@@ -100,7 +100,7 @@ cat <<'EOF'
   Nach dem Start erreichbar:
       IdentityIQ   http://localhost:8080/identityiq   (spadmin / admin)
       Mailpit      http://localhost:8025
-      pgAdmin      http://localhost:5050
+      Adminer      http://localhost:5050
 
   Der erste Start dauert mehrere Minuten - die Datenbank wird angelegt
   und die Basiskonfiguration importiert. Fortschritt verfolgen mit:
