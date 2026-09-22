@@ -80,8 +80,13 @@ The stack runs IdentityIQ twice against one database, the way most installations
 do: `iiq` serves the UI, `iiq-batch` runs the Task scheduler and the Request
 processor. Both come from the same image; the only differences are the server name
 (`IIQ_NODE` / `IIQ_BATCH_NODE` in `.env`, passed as `-Diiq.hostname`) and the port.
-`data/objects/05-ServiceDefinitions.xml` pins the `Task` and `Request` services to
-`hosts="iiq-batch"`; every other service stays `global`. Global Settings → Servers
+`data/objects/05-ServiceDefinitions.xml` pins the `Task`, `Request` and
+`BundleProfileRelation` services to `hosts="iiq-batch"`; every other service stays
+`global`. Both are background services: `Request` is the processor for asynchronous
+`Request` objects (workflow steps, mails, retries), not the web tier. IIQ starts a
+request processor on every node anyway so that requests addressed to a specific
+host reach it; the UI node's About page therefore shows the request scheduler as
+started while the task scheduler is stopped. Global Settings → Servers
 shows both nodes with their heartbeat and lets you move services per node at
 runtime, but that change lives in the database only. Rename the batch node in
 `.env` and in the XML together.

@@ -19,9 +19,23 @@
   Servers, which writes includedServices/excludedServices on the Server
   object); a file is what survives a volume reset.
 
-  Full objects, not a merge: the stock definitions have no attributes
-  besides the description, so nothing is lost. Every other service
-  (Heartbeat, Monitoring, PluginSync, FullText, ...) keeps hosts=global.
+  BundleProfileRelation (the role/profile relation synchronizer, 8.4+) is
+  pinned as well: a periodic database job that coordinates through a lock
+  (lockTimeout), so two nodes would only take turns doing the same work.
+  Its attributes are copied from init.xml - a full object replaces them.
+
+  Note on "Request": IIQ starts the RequestProcessor thread on EVERY node
+  regardless of hosts= (Servicer skips the host check for this one
+  service), because some requests are addressed to a specific host, e.g.
+  terminating a task that runs there. The About page therefore shows
+  "Request Scheduler Status: Started" on the UI node too. Unaddressed
+  requests are still taken only by hosts in this list
+  (ServicerUtil.isServiceAllowedOnServer in RequestProcessor).
+
+  Full objects, not a merge: the stock Task and Request definitions have
+  no attributes besides the description, so nothing is lost. Every other
+  service (Heartbeat, Monitoring, PluginSync, FullText, ...) keeps
+  hosts=global.
   ===========================================================================
 -->
 <sailpoint>
@@ -36,6 +50,26 @@ Service definition for the Task scheduler service.
     <Description>
 Service definition for the Request processor service.
     </Description>
+  </ServiceDefinition>
+
+  <ServiceDefinition name="BundleProfileRelation" hosts="iiq-batch" interval="60">
+    <Description>
+      Service definition for the BundleProfileRelationService.
+    </Description>
+    <Attributes>
+      <Map>
+        <entry key="lockTimeout">
+          <value>
+            <Integer>300</Integer>
+          </value>
+        </entry>
+        <entry key="cycleSeconds">
+          <value>
+            <Integer>10</Integer>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
   </ServiceDefinition>
 
 </sailpoint>

@@ -127,8 +127,8 @@ what makes the second node free: it needs nothing but the image and the database
 and `iiq-batch` (`IIQ_BATCH_NODE=iiq-batch`, port 8081) run the same image; the
 entrypoint appends `-Diiq.hostname` and `-Xmx` from the node's environment to a
 shared `CATALINA_OPTS` anchor, so the JVM options exist once in the compose file.
-`data/objects/05-ServiceDefinitions.xml` sets `hosts="iiq-batch"` on the `Task` and
-`Request` definitions; everything else stays `global`. Measured on a fresh database:
+`data/objects/05-ServiceDefinitions.xml` sets `hosts="iiq-batch"` on the `Task`,
+`Request` and `BundleProfileRelation` definitions; everything else stays `global`. Measured on a fresh database:
 both `Server` objects alive (heartbeat age < 10 s), all nine tasks and the stock
 `Perform maintenance` carry `host=iiq-batch` in `spt_task_result`, and the run-4
 numbers are reproduced exactly (105 identities, 322 transactions, `verify.sh` green).
@@ -143,8 +143,28 @@ Consequences worth knowing:
   every node runs its own scheduler against the same tables, which works only because
   IIQ serializes through its own `Server`/heartbeat logic. Pinning `Task` is the clean
   mode.
-- `requestServiceStarted=true` appears on *both* `Server` objects, also on the UI
-  node that runs no Request service. Not a signal. `host` in `spt_task_result` is.
+- **The Request service runs on every node by design**, whatever `hosts` says: the
+  About page on the UI node shows `Task Scheduler Status: Stopped` but
+  `Request Scheduler Status: Started`, and a `RequestProcessor` thread exists in both
+  JVMs. `Servicer` explicitly skips the host check for the service named `Request`
+  (bytecode: `"Request".equals(name) || def.isThisHostAllowed()`), because some
+  requests are addressed to one specific host — terminate or command a task running
+  there, partition results. `RequestProcessor` then sets
+  `_restricted = !ServicerUtil.isServiceAllowedOnServer(...)` and `isAllowed()` takes
+  a request on a restricted host only when `request.host` equals this host name.
+  Per-`RequestDefinition` `hosts` attributes narrow it further. So the UI node
+  receives targeted requests and nothing else; `requestServiceStarted=true` on its
+  `Server` object is not a signal, `host` in `spt_task_result` is.
+- `"Request"` and `"Task"` are both background services. The UI is Tomcat, not a
+  service, and needs no entry. A production export that excludes `Task` and
+  `Request` on the web node and nothing on the batch nodes is the same split written
+  from the other side (`excludedServices` on `Server`).
+- `BundleProfileRelation` (8.4+, keeps `spt_bundle_profile_relation` in sync for the
+  role search) is a periodic database job that coordinates through a lock
+  (`lockTimeout`), i.e. two nodes would take turns doing identical work. Pinned to
+  the batch node; a full object with the `init.xml` attributes, because a
+  `ServiceDefinition` import replaces the object. `Heartbeat`, `Monitoring`,
+  `PluginSync`, `FullText`, `Reanimator` are per-node by nature and stay `global`.
 - The per-node alternative — `includedServices`/`excludedServices` on the `Server`
   object, what Global Settings → Servers writes and what a production export shows —
   lives in the database only. The file wins after a volume reset; edits in the UI
