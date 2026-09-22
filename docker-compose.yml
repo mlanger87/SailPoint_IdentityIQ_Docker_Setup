@@ -12,6 +12,56 @@
 
 name: iiq85
 
+# ---------------------------------------------------------------------------
+# Shared pieces of the two IdentityIQ nodes (YAML anchors).
+#
+# Compose merges the top-level keys of a service, but REPLACES nested maps
+# such as "environment" and lists such as "volumes". Everything that must be
+# identical on both nodes therefore lives in an anchor and is referenced
+# from each node - a copy would drift, which is exactly what happened once
+# with CATALINA_OPTS between base and override.
+#
+# Per-node values (server name, heap, ports) are NOT in CATALINA_OPTS: the
+# entrypoint appends -Diiq.hostname and -Xmx from IIQ_NODE and IIQ_HEAP, so
+# the JVM options block can be shared verbatim.
+# ---------------------------------------------------------------------------
+
+# These flags MUST live here: the launcher WEB-INF/bin/iiq sets them
+# itself from Java 17 on, but Tomcat inherits nothing from it.
+# --add-exports is mandatory for JDK 17+ per Installation Guide (p.6);
+# without --add-opens, parts of Hibernate/Spring fail under Java 21's
+# stricter module encapsulation.
+# NOTE: a YAML folded block (>-) has NO comments - a # line inside becomes
+# part of the value and is passed to the JVM as an argument. Explanations
+# belong here, above the block.
+#
+# Not set: com.sun.jndi.ldap.connect.pool.protocol. Its value would be
+# "plain ssl" - with a space, which cannot be passed inside a folded
+# block. Unquoted, "ssl" becomes a separate argument (Java: "Could not
+# find or load main class ssl"); quoted, the quotes end up as literals in
+# the value. Either way Tomcat fails to start. The option only controls
+# pooling for LDAPS connections and is dispensable in a dev environment.
+# If needed, set it via JAVA_TOOL_OPTIONS in the environment block.
+x-iiq-catalina-opts: &iiq-catalina-opts >-
+  -Xms1g
+  -XX:+UseG1GC
+  -Djava.awt.headless=true
+  --add-opens=java.base/java.lang=ALL-UNNAMED
+  --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+  --add-opens=java.base/java.util=ALL-UNNAMED
+  --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
+  -Dcom.sun.jndi.ldap.connect.pool.timeout=3000
+  ${IIQ_EXTRA_OPTS:-}
+
+x-iiq-volumes: &iiq-volumes
+  - ./data/objects:/data/objects:ro
+  - ./data/plugins:/data/plugins:ro
+  - ./data/certs:/data/certs:ro
+  # Authoritative HR source for the DelimitedFile connector. Deliberately
+  # writable so the file can be extended from inside the container. This
+  # path is what the Application's "file" attribute points to.
+  - ./data/hr:/data/hr
+
 services:
 
   # -------------------------------------------------------------------------
@@ -101,15 +151,7 @@ services:
       INIT: "y"
       DB_HOST: postgres
       DB_PORT: "5432"
-    volumes:
-      - ./data/objects:/data/objects:ro
-      - ./data/plugins:/data/plugins:ro
-      - ./data/certs:/data/certs:ro
-      # Authoritative HR source for the DelimitedFile connector.
-      # Deliberately writable so the file can be extended from inside
-      # the container. This path is what the Application's "file"
-      # attribute points to.
-      - ./data/hr:/data/hr
+    volumes: *iiq-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -121,7 +163,18 @@ services:
     networks: [iiq-net]
 
   # -------------------------------------------------------------------------
-  # IdentityIQ on Tomcat 9 / OpenJDK 21
+  # IdentityIQ on Tomcat 9 / OpenJDK 21 - two nodes on one database
+  #
+  # The usual production shape: a UI node that serves requests and a batch
+  # node that runs the Task scheduler and the Request processor. Both run
+  # the same image against the same database; which node runs which
+  # service is decided by the ServiceDefinition objects (hosts="iiq-batch"
+  # in data/objects/05-ServiceDefinitions.xml), not by anything here.
+  # Each node registers a Server object named after IIQ_NODE /
+  # IIQ_BATCH_NODE (-Diiq.hostname, appended by the entrypoint).
+  #
+  # No load balancer: this is a dev box, every node has its own port.
+  # Sticky sessions only matter once one URL fronts several UI nodes.
   # -------------------------------------------------------------------------
   iiq:
     build: *iiq-build
@@ -135,47 +188,36 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
-      # These flags MUST live here: the launcher WEB-INF/bin/iiq sets
-      # them itself from Java 17 on, but Tomcat inherits nothing from it.
-      # --add-exports is mandatory for JDK 17+ per Installation Guide
-      # (p.6); without --add-opens, parts of Hibernate/Spring fail under
-      # Java 21's stricter module encapsulation.
-      # NOTE: a YAML folded block (>-) has NO comments - a # line inside
-      # becomes part of the value and is passed to the JVM as an
-      # argument. Explanations belong here, above the block.
-      #
-      # Not set: com.sun.jndi.ldap.connect.pool.protocol. Its value would
-      # be "plain ssl" - with a space, which cannot be passed inside a
-      # folded block. Unquoted, "ssl" becomes a separate argument (Java:
-      # "Could not find or load main class ssl"); quoted, the quotes end
-      # up as literals in the value. Either way Tomcat fails to start.
-      #
-      # The option only controls pooling for LDAPS connections and is
-      # dispensable in a dev environment. If needed, set it via
-      # JAVA_TOOL_OPTIONS in the environment block.
-      CATALINA_OPTS: >-
-        -Xms1g
-        -Xmx${IIQ_HEAP:-4g}
-        -XX:+UseG1GC
-        -Djava.awt.headless=true
-        -Diiq.hostname=${IIQ_NODE:-iiq-dev}
-        --add-opens=java.base/java.lang=ALL-UNNAMED
-        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
-        --add-opens=java.base/java.util=ALL-UNNAMED
-        --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
-        -Dcom.sun.jndi.ldap.connect.pool.timeout=3000
-        ${IIQ_EXTRA_OPTS:-}
+      IIQ_NODE: ${IIQ_NODE:-iiq-ui}
+      IIQ_HEAP: ${IIQ_HEAP:-3g}
+      CATALINA_OPTS: *iiq-catalina-opts
     ports:
       - "127.0.0.1:${IIQ_HTTP_PORT:-8080}:8080"
-    volumes:
-      - ./data/objects:/data/objects:ro
-      - ./data/plugins:/data/plugins:ro
-      - ./data/certs:/data/certs:ro
-      # Authoritative HR source for the DelimitedFile connector.
-      # Deliberately writable so the file can be extended from inside
-      # the container. This path is what the Application's "file"
-      # attribute points to.
-      - ./data/hr:/data/hr
+    volumes: *iiq-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      iiq-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  iiq-batch:
+    image: iiq-app:${IIQ_VERSION:-8.5}
+    container_name: iiq-batch
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      IIQ_NODE: ${IIQ_BATCH_NODE:-iiq-batch}
+      IIQ_HEAP: ${IIQ_BATCH_HEAP:-3g}
+      CATALINA_OPTS: *iiq-catalina-opts
+    # The batch node serves the UI as well (same WAR); published so the
+    # Servers page and the task results can be checked on either node.
+    ports:
+      - "127.0.0.1:${IIQ_BATCH_HTTP_PORT:-8081}:8080"
+    volumes: *iiq-volumes
     depends_on:
       postgres:
         condition: service_healthy

@@ -150,6 +150,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+step "4b. Two IIQ nodes: UI and batch"
+# ---------------------------------------------------------------------------
+# Both nodes register a Server object named after -Diiq.hostname and refresh
+# its heartbeat; the Task and Request services are pinned to the batch node
+# through data/objects/05-ServiceDefinitions.xml.
+bport="${IIQ_BATCH_HTTP_PORT}"
+bcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15         "http://localhost:${bport}/identityiq/login.jsf" 2>/dev/null)" || true
+bcode="${bcode:-000}"
+if [ "${bcode}" = "200" ] || [ "${bcode}" = "302" ]; then
+    ok "batch node login page responds (HTTP ${bcode})"
+else
+    fail "batch node login page does not respond (HTTP ${bcode})"
+    info "docker compose logs -f iiq-batch"
+fi
+
+# Heartbeat within the last 2 minutes = the node is alive from IIQ's view.
+live_nodes="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc     "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_server
+      WHERE inactive = false AND name NOT LIKE '%-console'
+        AND heartbeat > (extract(epoch from now()) * 1000)::bigint - 120000;" 2>/dev/null | tr -d '[:space:]')"
+case ",${live_nodes}," in
+    *,iiq-batch,*) ok "Server objects with a fresh heartbeat: ${live_nodes}" ;;
+    *) fail "batch node has no fresh heartbeat (live: ${live_nodes:-none})" ;;
+esac
+
+task_hosts="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc     "SELECT hosts FROM identityiq.spt_service_definition WHERE name='Task';" 2>/dev/null | tr -d '[:space:]')"
+if [ "${task_hosts}" = "iiq-batch" ]; then
+    ok "Task service pinned to hosts=${task_hosts}"
+else
+    fail "Task service hosts='${task_hosts}' (expected iiq-batch; is 05-ServiceDefinitions.xml imported?)"
+fi
+
+# ---------------------------------------------------------------------------
 step "5. Quartz scheduler (PostgreSQL delegate)"
 # ---------------------------------------------------------------------------
 # With a wrong delegate these tables would stay empty, or the scheduler
@@ -162,9 +194,9 @@ else
     fail "Quartz tables not readable"
 fi
 
-if docker compose logs iiq 2>/dev/null | grep -qiE "quartz.*(exception|error)"; then
+if docker compose logs iiq iiq-batch 2>/dev/null | grep -qiE "quartz.*(exception|error)"; then
     fail "Quartz errors in the log - check the delegate"
-    info "docker compose logs iiq | grep -i quartz"
+    info "docker compose logs iiq iiq-batch | grep -i quartz"
 else
     ok "no Quartz errors in the log"
 fi

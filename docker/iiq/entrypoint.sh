@@ -305,5 +305,13 @@ if [ "${INIT:-}" = "y" ]; then
 fi
 
 log "Mode: application server"
+# Per-node JVM options. The shared CATALINA_OPTS block in docker-compose.yml
+# carries everything that is identical on every node; the server name
+# (-Diiq.hostname -> name of the Server object, and what the
+# ServiceDefinition "hosts" lists refer to) and the heap are appended here
+# from the node's own environment.
+IIQ_NODE="${IIQ_NODE:-iiq-dev}"
+export CATALINA_OPTS="${CATALINA_OPTS:-} -Xmx${IIQ_HEAP:-4g} -Diiq.hostname=${IIQ_NODE}"
+log "Node: ${IIQ_NODE} (heap ${IIQ_HEAP:-4g})"
 wait_for_db
 exec "$@"

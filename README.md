@@ -32,8 +32,9 @@ docker compose logs -f iiq-init
 bash scripts/verify.sh
 ```
 
-Subsequent starts take about a minute. `iiq` starts only after `iiq-init` exited 0;
-if it does not come up, read `docker compose logs iiq-init`.
+Subsequent starts take about a minute. The two IIQ nodes `iiq` (UI) and `iiq-batch`
+(tasks and requests) start only after `iiq-init` exited 0; if they do not come up,
+read `docker compose logs iiq-init`.
 
 ## Endpoints
 
@@ -41,7 +42,8 @@ All ports bind to `127.0.0.1`. Change them in `.env`.
 
 | Service | URL | Credentials |
 |---|---|---|
-| IdentityIQ | http://localhost:8080/identityiq | `spadmin` / `admin` |
+| IdentityIQ, UI node | http://localhost:8080/identityiq | `spadmin` / `admin` |
+| IdentityIQ, batch node | http://localhost:8081/identityiq | same; runs the tasks, see [Two nodes](#two-nodes-ui-and-batch) |
 | Mailpit (mail sink) | http://localhost:8025 | — |
 | DBGate (SQL) | http://localhost:5050 | four connections preconfigured |
 | LDAP UI | http://localhost:5080 | `admin` / `adminpassword` |
@@ -71,6 +73,23 @@ Ports and credentials shown by the scripts come from `.env` via `scripts/env.sh`
   adds and merges. Use `delete <Class> "<name>"` in the console.
 - **Ad-hoc SQL:** DBGate, or `.\scripts\iiq.ps1 psql`. Tables live in schema
   `identityiq`, not `public`; `search_path` is preset per role.
+
+## Two nodes: UI and batch
+
+The stack runs IdentityIQ twice against one database, the way most installations
+do: `iiq` serves the UI, `iiq-batch` runs the Task scheduler and the Request
+processor. Both come from the same image; the only differences are the server name
+(`IIQ_NODE` / `IIQ_BATCH_NODE` in `.env`, passed as `-Diiq.hostname`) and the port.
+`data/objects/05-ServiceDefinitions.xml` pins the `Task` and `Request` services to
+`hosts="iiq-batch"`; every other service stays `global`. Global Settings → Servers
+shows both nodes with their heartbeat and lets you move services per node at
+runtime, but that change lives in the database only. Rename the batch node in
+`.env` and in the XML together.
+
+Tasks started from the UI on port 8080 or from the console run on the batch node;
+the task result records the executing `host`. There is no load balancer: two
+ports, no sticky sessions. Debugging (JDWP) and the log bind mount `data/logs/`
+belong to the UI node; the batch node logs to `data/logs/batch/`.
 
 ## System landscape
 
@@ -172,7 +191,7 @@ entries) and `Refresh Identity Cube` (recreates them from the roles).
 
 ```
 docker-compose.yml            services, health checks, loopback ports
-docker-compose.override.yml   dev extras: JDWP, log bind-mount (auto-loaded)
+docker-compose.override.yml   dev extras: JDWP, log bind-mounts (auto-loaded)
 .env                          ports, credentials, heap, IIQ_EXTRA_OPTS (gitignored)
 installer/                    the SailPoint ZIP (gitignored)
 docker/iiq/                   Tomcat 9 + JDK 21 image, entrypoint, patch scripts
@@ -188,16 +207,17 @@ data/plugins/, data/certs/    mounted read-only into iiq
 scripts/                      setup, verify, iiq wrapper, test-data generator
 ```
 
-Containers: `postgres`, `iiq-init` (runs once, exits), `iiq`, `mailpit`, `openldap`,
-`ldap-ui`, `dbgate`, `scim`, `mockapi`. Six have health checks; `iiq` waits for
-`postgres` healthy and `iiq-init` completed.
+Containers: `postgres`, `iiq-init` (runs once, exits), `iiq`, `iiq-batch`, `mailpit`,
+`openldap`, `ldap-ui`, `dbgate`, `scim`, `mockapi`. Seven have health checks; both IIQ
+nodes wait for `postgres` healthy and `iiq-init` completed.
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| `iiq` never starts | `iiq-init` exited non-zero. `docker compose logs iiq-init`; the entrypoint greps console output for real failures. |
-| Login page HTTP 000 right after start | Tomcat needs 1–3 min. `docker compose logs -f iiq`. |
+| `iiq` / `iiq-batch` never start | `iiq-init` exited non-zero. `docker compose logs iiq-init`; the entrypoint greps console output for real failures. |
+| Login page HTTP 000 right after start | Tomcat needs 1–3 min. `docker compose logs -f iiq iiq-batch`. |
+| A task never leaves "Pending" | Nothing runs the Task service: the batch node is down, or its `IIQ_BATCH_NODE` differs from `hosts=` in `05-ServiceDefinitions.xml`. Global Settings → Servers shows which node is alive. |
 | Aggregation "Success" but 0 accounts / 0 roles / no manager | Silent misconfiguration — see the pattern in CLAUDE.md. Compare expected vs. actual with an isolated rule/filter call. |
 | Task stuck "running" after a crash | `UPDATE spt_task_result SET completion_status='Terminated' WHERE completion_status IS NULL;` |
 | REST create/update fails, unclear what was sent | The override sets `LOG_BODIES=true` on the mock: `docker compose logs mockapi` shows every request body. |

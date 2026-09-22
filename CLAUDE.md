@@ -10,7 +10,8 @@ instance, the instance wins; update this file.
 A local Docker development environment for **SailPoint IdentityIQ 8.5** on
 **Tomcat 9 / OpenJDK 21 / PostgreSQL 17**, with a complete miniature system landscape:
 an authoritative HR source and four provisioning targets (LDAP, JDBC, SCIM 2.0,
-generic REST), plus joiner/leaver lifecycle driven by dates in the HR feed.
+generic REST), plus joiner/leaver lifecycle driven by dates in the HR feed. IIQ runs
+as two nodes on one database, a UI node and a batch node, the usual production shape.
 
 The IIQ installation package is licensed and **not** in the repository. Drop it into
 `installer/`.
@@ -118,9 +119,43 @@ from it; a changed XML would otherwise re-trigger builds.
 
 ## Architecture decisions
 
-**Init container.** `iiq-init` runs once and exits; `iiq` starts only after
-`service_completed_successfully`. Keeps "initialize once" apart from "serve", and stays
-correct with multiple IIQ nodes later.
+**Init container.** `iiq-init` runs once and exits; both IIQ nodes start only after
+`service_completed_successfully`. Keeps "initialize once" apart from "serve", which is
+what makes the second node free: it needs nothing but the image and the database.
+
+**Two nodes, UI and batch, on one database.** `iiq` (`IIQ_NODE=iiq-ui`, port 8080)
+and `iiq-batch` (`IIQ_BATCH_NODE=iiq-batch`, port 8081) run the same image; the
+entrypoint appends `-Diiq.hostname` and `-Xmx` from the node's environment to a
+shared `CATALINA_OPTS` anchor, so the JVM options exist once in the compose file.
+`data/objects/05-ServiceDefinitions.xml` sets `hosts="iiq-batch"` on the `Task` and
+`Request` definitions; everything else stays `global`. Measured on a fresh database:
+both `Server` objects alive (heartbeat age < 10 s), all nine tasks and the stock
+`Perform maintenance` carry `host=iiq-batch` in `spt_task_result`, and the run-4
+numbers are reproduced exactly (105 identities, 322 transactions, `verify.sh` green).
+Consequences worth knowing:
+- `run` in the console works from any container, including the init container:
+  the console only schedules, the batch node executes. The console process no
+  longer runs the Task service, so the "keep the console open until the task
+  finishes" rule (see Pitfalls) is now about polling, not about keeping the
+  scheduler alive.
+- There is exactly one Quartz scheduler. IIQ does not configure Quartz clustering
+  (`iiqBeans.xml`: `LocalDataSourceJobStore`, no `isClustered`); with `hosts=global`
+  every node runs its own scheduler against the same tables, which works only because
+  IIQ serializes through its own `Server`/heartbeat logic. Pinning `Task` is the clean
+  mode.
+- `requestServiceStarted=true` appears on *both* `Server` objects, also on the UI
+  node that runs no Request service. Not a signal. `host` in `spt_task_result` is.
+- The per-node alternative — `includedServices`/`excludedServices` on the `Server`
+  object, what Global Settings → Servers writes and what a production export shows —
+  lives in the database only. The file wins after a volume reset; edits in the UI
+  win until the next reset.
+- The name in the XML and `IIQ_BATCH_NODE` must match. With a mismatch no node runs
+  `Task`; tasks stay pending forever and nothing logs an error. `verify.sh` step 4b
+  checks the heartbeat of `iiq-batch` and `hosts` of `Task`.
+- No load balancer: reference project C fronts N replicas with Traefik and sticky
+  sessions and hands out server names through a counter service. Two fixed names and
+  two ports are simpler and sufficient for one developer; sticky sessions only
+  matter once one URL fronts several UI nodes.
 
 **Idempotency via database state, not a marker file.** `entrypoint.sh` runs
 `get Identity spadmin`. Reference project A uses a marker in a volume-mounted Tomcat
@@ -223,6 +258,10 @@ like. Anything else is a regression.
 | disabled links LDAP / JDBC / SCIM / REST | 3 / 2 / 2 / 2 | the disabled seed accounts, state carried by each connector |
 | roles | employee 90, it-staff 19, sales-staff 18, manager 18, operations-staff 17, finance-staff 11, hr-staff 9 | exact CSV counts |
 | leaver / joiner workflow runs | 0 / 0 | triggers fire on transitions; see the lifecycle pitfall |
+| `Server` objects alive / task host | `iiq-ui`, `iiq-batch` / every task result `host=iiq-batch` | two nodes, `Task` and `Request` pinned to the batch node |
+
+Reproduced unchanged on 2026-09-22 after the split into two nodes (fresh volumes,
+rebuilt images).
 
 The three items that were open before this run — roles at 0, manager empty, the
 Daniel Morgan merge — are closed; their root causes are recorded under Pitfalls
@@ -315,9 +354,12 @@ part of the fresh run above.
   import lines. Anyone changing it re-tests both lists.
 - **`run` needs quotes** around names with spaces. `run LDAP Group Aggregation` → tries a
   task named `LDAP` → "Ambiguous objects", exit code 0, nothing runs.
-- **`run` returns immediately.** `quit` right after shuts the scheduler down and aborts
-  the task ("The Scheduler has been shutdown"). Keep the console open until the task
-  finishes; poll `spt_task_result.completion_status`. Do not trust sleep estimates —
+- **`run` returns immediately.** With `hosts=global` (the stock setting) the console
+  process runs its own Task service, and `quit` right after `run` shuts that
+  scheduler down and aborts the task ("The Scheduler has been shutdown"). With
+  `Task` pinned to `iiq-batch` (this repo) the batch node executes and the console
+  may quit — but the scripts still poll `spt_task_result.completion_status` before
+  starting the next task, because the order matters. Do not trust sleep estimates —
   a refresh once ran *before* its aggregation because the sleep was too short; check
   timestamps.
 - A task killed mid-run stays "running" in `spt_task_result` even after a container
@@ -595,6 +637,12 @@ minimal application that worked and adding one thing at a time:
   sensitive groups collapse to one or two members.
 - Non-ASCII values must be base64 in LDIF (RFC 2849, `cn:: …`); `ldif_value()` handles
   it. Current data is ASCII; the function stays for extensions.
+
+**Multi-node.** Only project C runs more than one IIQ node: `deploy.replicas`,
+Traefik with sticky sessions, a `counter` service handing out `iiq1`, `iiq2` … as
+`-Diiq.hostname`. None of the four separates UI from batch through
+`ServiceDefinition hosts` or `Server` `excludedServices`; every replica there runs
+every service.
 
 ## Reference projects
 

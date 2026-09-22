@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<!--
+  ===========================================================================
+  Which IIQ node runs which background service.
+
+  Two nodes share the database (docker-compose.yml: "iiq" and
+  "iiq-batch"). The stock definitions carry hosts="global", i.e. every
+  node starts a Task scheduler and a Request processor. Restricting both
+  to the batch node gives the usual production shape: the UI node only
+  serves requests, tasks and requests run on exactly one JVM, and there
+  is exactly one Quartz scheduler (IIQ does not configure Quartz
+  clustering; the hosts list is the mechanism that keeps schedulers
+  apart).
+
+  hosts= is a comma-separated list of Server names, i.e. the values of
+  -Diiq.hostname (IIQ_BATCH_NODE in .env). Rename both or neither. The
+  same effect can be reached per node in the UI (Global Settings >
+  Servers, which writes includedServices/excludedServices on the Server
+  object); a file is what survives a volume reset.
+
+  Full objects, not a merge: the stock definitions have no attributes
+  besides the description, so nothing is lost. Every other service
+  (Heartbeat, Monitoring, PluginSync, FullText, ...) keeps hosts=global.
+  ===========================================================================
+-->
+<sailpoint>
+
+  <ServiceDefinition name="Task" hosts="iiq-batch">
+    <Description>
+Service definition for the Task scheduler service.
+    </Description>
+  </ServiceDefinition>
+
+  <ServiceDefinition name="Request" hosts="iiq-batch">
+    <Description>
+Service definition for the Request processor service.
+    </Description>
+  </ServiceDefinition>
+
+</sailpoint>

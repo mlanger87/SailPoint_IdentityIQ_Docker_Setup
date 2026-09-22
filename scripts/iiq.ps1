@@ -41,7 +41,8 @@ try {
         }
 
         'logs' {
-            docker compose logs -f iiq
+            # Both nodes; the prefix tells them apart.
+            docker compose logs -f iiq iiq-batch
         }
 
         'status' {
@@ -60,8 +61,8 @@ try {
         }
 
         'restart' {
-            Invoke-Compose restart iiq
-            Write-Host "IdentityIQ restarted." -ForegroundColor Green
+            Invoke-Compose restart iiq iiq-batch
+            Write-Host "IdentityIQ nodes restarted." -ForegroundColor Green
         }
 
         'reset' {

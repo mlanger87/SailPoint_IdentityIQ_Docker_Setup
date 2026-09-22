@@ -15,6 +15,7 @@ $script:EnvRoot = Split-Path -Parent $PSScriptRoot
 # Defaults mirror docker-compose.yml. Keep both in sync.
 $script:EnvDefaults = @{
     IIQ_HTTP_PORT       = '8080'
+    IIQ_BATCH_HTTP_PORT = '8081'
     IIQ_DEBUG_PORT      = '8000'
     POSTGRES_PORT       = '5432'
     MAILPIT_UI_PORT     = '8025'
@@ -55,6 +56,7 @@ function Get-PublishedPorts {
     $e = Get-DotEnv
     return [ordered]@{
         'IdentityIQ'    = [int]$e.IIQ_HTTP_PORT
+        'IIQ batch'     = [int]$e.IIQ_BATCH_HTTP_PORT
         'JDWP'          = [int]$e.IIQ_DEBUG_PORT
         'PostgreSQL'    = [int]$e.POSTGRES_PORT
         'Mailpit'       = [int]$e.MAILPIT_UI_PORT
@@ -71,6 +73,7 @@ function Write-Endpoints {
     param([string]$Indent = '  ')
     $e = Get-DotEnv
     Write-Host "${Indent}IdentityIQ     http://localhost:$($e.IIQ_HTTP_PORT)/identityiq   (spadmin / admin)"
+    Write-Host "${Indent}IIQ batch node http://localhost:$($e.IIQ_BATCH_HTTP_PORT)/identityiq   (same login; runs tasks)"
     Write-Host "${Indent}Mailpit        http://localhost:$($e.MAILPIT_UI_PORT)"
     Write-Host "${Indent}DBGate         http://localhost:$($e.DBGATE_PORT)"
     Write-Host "${Indent}LDAP UI        http://localhost:$($e.LDAP_UI_PORT)   ($($e.LDAP_ADMIN_USER) / $($e.LDAP_ADMIN_PASSWORD))"

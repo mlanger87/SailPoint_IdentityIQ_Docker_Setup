@@ -53,6 +53,13 @@ services:
       - ./data/certs:/data/certs:ro
       - ./data/logs:/usr/local/tomcat/logs
 
+  iiq-batch:
+    # No debugger on the batch node; attach to the UI node. Own log
+    # directory - two Tomcats writing catalina.out into one bind mount
+    # would interleave.
+    volumes:
+      - ./data/logs/batch:/usr/local/tomcat/logs
+
   mockapi:
     environment:
       LOG_BODIES: "true"

@@ -76,8 +76,9 @@ respective project.
 - **Plugin database created with grants parsed from `iiq.properties`**, shipped plugins
   DDL run if present. **maybe** — verify we run the Postgres plugins DDL if one exists.
 - **Multi-node with a `counter` sidecar for `iiq.hostname`** plus **Traefik sticky
-  sessions** (`docker-compose.yml` 4–6, 75–136). **maybe** — package deal, medium/large;
-  Traefik mounts the Docker socket.
+  sessions** (`docker-compose.yml` 4–6, 75–136). **done differently** — two fixed
+  nodes (UI and batch) with `ServiceDefinition hosts`, no load balancer, no counter;
+  C's replicas all run every service, which is not how installations are shaped.
 - ActiveMQ Artemis service. **no** for a laptop.
 - **SSH server + `Linux - Direct` application** (`DemoObjects/Application-LinuxAccount.xml`).
   **maybe** — a fifth connector family, brittle.
@@ -155,7 +156,7 @@ respective project.
 | 9 | Demo surface: `PopulationRef` selector, `groupFactory`, `editMode`, SoD policy on a permissions table | medium | C |
 | 10 | Image slimming in the extract stage | small | D |
 
-Below the cut: multi-node + Traefik (C), HTTPD/TLS proxy (D), SSH/Linux target (C), UI
+Below the cut: Traefik in front of N replicas (C; two named nodes are in), HTTPD/TLS proxy (D), SSH/Linux target (C), UI
 identity forms (A), JMX profile (D), staging CLI (C), partitioning (C), SSB (D).
 
 ## Do not copy

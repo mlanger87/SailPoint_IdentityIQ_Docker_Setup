@@ -32,6 +32,7 @@ unset _line _key _val
 
 # Defaults mirror docker-compose.yml. Keep both in sync.
 : "${IIQ_HTTP_PORT:=8080}"
+: "${IIQ_BATCH_HTTP_PORT:=8081}"
 : "${IIQ_DEBUG_PORT:=8000}"
 : "${POSTGRES_PORT:=5432}"
 : "${MAILPIT_UI_PORT:=8025}"
@@ -47,13 +48,13 @@ unset _line _key _val
 : "${MOCKAPI_TOKEN:=mocktoken}"
 : "${MOCKAPI_USER:=iiq}"
 : "${MOCKAPI_PASSWORD:=iiqpassword}"
-export IIQ_HTTP_PORT IIQ_DEBUG_PORT POSTGRES_PORT MAILPIT_UI_PORT DBGATE_PORT \
+export IIQ_HTTP_PORT IIQ_BATCH_HTTP_PORT IIQ_DEBUG_PORT POSTGRES_PORT MAILPIT_UI_PORT DBGATE_PORT \
        LDAP_PORT LDAP_UI_PORT SCIM_PORT MOCKAPI_PORT LDAP_ROOT LDAP_ADMIN_USER \
        LDAP_ADMIN_PASSWORD SCIM_API_KEY MOCKAPI_TOKEN MOCKAPI_USER MOCKAPI_PASSWORD
 
 # Ports that must be free on the host before the stack starts.
 env_published_ports() {
-    printf '%s\n' "${IIQ_HTTP_PORT}" "${IIQ_DEBUG_PORT}" "${POSTGRES_PORT}" \
+    printf '%s\n' "${IIQ_HTTP_PORT}" "${IIQ_BATCH_HTTP_PORT}" "${IIQ_DEBUG_PORT}" "${POSTGRES_PORT}" \
         "${MAILPIT_UI_PORT}" "${DBGATE_PORT}" "${LDAP_PORT}" "${LDAP_UI_PORT}" \
         "${SCIM_PORT}" "${MOCKAPI_PORT}"
 }
@@ -62,6 +63,7 @@ env_published_ports() {
 env_print_endpoints() {
     local i="${1:-  }"
     printf '%sIdentityIQ     http://localhost:%s/identityiq   (spadmin / admin)\n' "$i" "${IIQ_HTTP_PORT}"
+    printf '%sIIQ batch node http://localhost:%s/identityiq   (same login; runs tasks)\n' "$i" "${IIQ_BATCH_HTTP_PORT}"
     printf '%sMailpit        http://localhost:%s\n'              "$i" "${MAILPIT_UI_PORT}"
     printf '%sDBGate         http://localhost:%s\n'              "$i" "${DBGATE_PORT}"
     printf '%sLDAP UI        http://localhost:%s   (%s / %s)\n'   "$i" "${LDAP_UI_PORT}" "${LDAP_ADMIN_USER}" "${LDAP_ADMIN_PASSWORD}"
