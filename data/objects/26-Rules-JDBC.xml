@@ -90,6 +90,11 @@
       }
 
       map.put("roles", roles);
+
+      // Account state. IIQ recognises the reserved attribute IIQDisabled
+      // on the ResourceObject; without it every JDBC account shows as
+      // enabled regardless of the Status column.
+      map.put("IIQDisabled", "disabled".equalsIgnoreCase((String) map.get("Status")));
       return map;
     ]]></Source>
   </Rule>
@@ -143,7 +148,16 @@
           }
       }
 
-      String iiqid = (String) values.get("IIQID");
+      // IIQID is the schema's identityAttribute. The Provisioner moves
+      // that value out of the AttributeRequests into
+      // AccountRequest.nativeIdentity, so it is NOT in the map even
+      // though the create policy sets it. Measured: every role-driven
+      // create failed with "IIQID missing" while the request carried
+      // nativeIdentity="1075".
+      String iiqid = request.getNativeIdentity();
+      if (Util.isNullOrEmpty(iiqid)) {
+          iiqid = (String) values.get("IIQID");
+      }
       if (Util.isNullOrEmpty(iiqid)) {
           result.setStatus(ProvisioningResult.STATUS_FAILED);
           result.addError("IIQID missing, the account cannot be created.");
@@ -172,7 +186,7 @@
           ps.setString(11, (String) values.get("Location"));
           ps.setString(12, (String) values.get("EmploymentType"));
           ps.setString(13, values.get("Status") != null
-                           ? (String) values.get("Status") : "aktiv");
+                           ? (String) values.get("Status") : "active");
           ps.executeUpdate();
           ps.close();
           ps = null;
@@ -414,7 +428,7 @@
       PreparedStatement ps = null;
       try {
           ps = connection.prepareStatement(
-              "UPDATE targetapp.\"IIQData\" SET \"Status\" = 'aktiv', " +
+              "UPDATE targetapp.\"IIQData\" SET \"Status\" = 'active', " +
               "\"Modified\" = CURRENT_TIMESTAMP WHERE \"IIQID\" = ?");
           ps.setString(1, iiqid);
           ps.executeUpdate();
@@ -463,7 +477,7 @@
       PreparedStatement ps = null;
       try {
           ps = connection.prepareStatement(
-              "UPDATE targetapp.\"IIQData\" SET \"Status\" = 'inaktiv', " +
+              "UPDATE targetapp.\"IIQData\" SET \"Status\" = 'disabled', " +
               "\"Modified\" = CURRENT_TIMESTAMP WHERE \"IIQID\" = ?");
           ps.setString(1, iiqid);
           ps.executeUpdate();

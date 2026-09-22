@@ -8,7 +8,8 @@
 #   docker/openldap/ldif/02-users.ldif   seed accounts only (target system)
 #   docker/openldap/ldif/03-groups.ldif  all groups (entitlements)
 #   docker/postgres/04-targetdb-seed.sql  JDBC seed accounts (initdb hook)
-#   data/seed/scim-users.json             SCIM seed users (scripts/seed-scim.py)
+#   data/seed/scim-users.json             SCIM seed users (loaded by the scim container)
+#   data/seed/scim-groups.json            SCIM group catalog and seed memberships
 #
 # System roles:
 #   - The HR CSV is the SOURCE. It creates the identities in IIQ.
@@ -49,6 +50,7 @@ import base64
 import csv
 import datetime
 import json
+import uuid
 import random
 import unicodedata
 from pathlib import Path
@@ -489,10 +491,15 @@ def build_groups(people: list[dict], count: int, rnd: random.Random) -> list[dic
     return groups[:count]
 
 
-def write_users(path: Path, people: list[dict]) -> None:
+def write_users(path: Path, people: list[dict], disabled: set[str]) -> None:
     """
     Writes ONLY the seed accounts. LDAP is the target - IIQ provisions
     all other accounts itself.
+
+    Accounts whose employeeNumber is in `disabled` carry the ppolicy lock
+    (pwdAccountLockedTime with the permanent-lock value), the same
+    attribute the connector sets on Disable; the LDAP application maps it
+    to IIQDisabled through revokeAttr/revokeVal.
     """
     password_b64 = base64.b64encode(PASSWORD.encode()).decode()
     lines: list[str] = [
@@ -541,6 +548,8 @@ def write_users(path: Path, people: list[dict]) -> None:
         if person["manager"]:
             lines.append(f"manager: uid={person['manager']},{PEOPLE_DN}")
         lines.append(f"userPassword:: {password_b64}")
+        if person["employeeNumber"] in disabled:
+            lines.append("pwdAccountLockedTime: 000001010000Z")
         lines.append("")
 
     path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
@@ -724,7 +733,7 @@ JDBC_SEED_ROLES = [
 ]
 
 
-def write_jdbc_seed(path: Path, people: list[dict]) -> None:
+def write_jdbc_seed(path: Path, people: list[dict], disabled: set[str]) -> None:
     """
     Seed accounts for the JDBC target (targetdb), as an initdb-hook
     fragment. The DDL stays hand-written in 03-targetdb.sql; only the
@@ -732,8 +741,9 @@ def write_jdbc_seed(path: Path, people: list[dict]) -> None:
     (they did: 1030 was "Vincent Russell" in SQL and "Daniel Morgan" in
     the CSV).
 
-    'aktiv'/'inaktiv' are the target's own status vocabulary and a
-    contract with 26-Rules-JDBC.xml / 27-Application-JDBC.xml.
+    'active'/'disabled' are the target's own status vocabulary and a
+    contract with 03-targetdb.sql, 26-Rules-JDBC.xml and
+    27-Application-JDBC.xml.
     EmploymentType carries the HR level, which is what the create policy
     writes for provisioned accounts.
     """
@@ -759,7 +769,8 @@ def write_jdbc_seed(path: Path, people: list[dict]) -> None:
             person["employeeNumber"], person["uid"], person["first"],
             person["last"], person["cn"], person["mail"], person["phone"],
             person["title"], person["department"], person["costCentre"],
-            person["location"], person["level"], "aktiv")) + ")")
+            person["location"], person["level"],
+            "disabled" if person["employeeNumber"] in disabled else "active")) + ")")
     lines.append(",\n".join(rows) + ";")
     lines += ["", "INSERT INTO targetapp.\"IIQAccountRoles\" (\"IIQID\", \"RoleName\") VALUES"]
     pairs = []
@@ -771,12 +782,37 @@ def write_jdbc_seed(path: Path, people: list[dict]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
-def write_scim_seed(path: Path, people: list[dict]) -> None:
+# SCIM group catalog: the entitlements IIQ can assign on the SCIM target.
+# Static like the LDAP groups and the JDBC roles. The seed memberships are
+# cycled over the seed users, uneven on purpose.
+SCIM_GROUPS = [
+    "ops-planning", "ops-dispatch", "ops-warehouse",
+    "ops-fleet", "ops-reporting", "ops-admin",
+]
+SCIM_SEED_GROUPS = [
+    ["ops-planning", "ops-reporting"],
+    ["ops-dispatch"],
+    ["ops-planning", "ops-admin"],
+]
+
+
+def scim_group_id(name: str) -> str:
     """
-    Seed users for the SCIM target as RFC 7643 User resources. The SCIM
-    server keeps its data inside the container, so `docker compose down`
-    wipes it; scripts/seed-scim.py replays this file (idempotent by
-    externalId). externalId carries the employeeNumber for correlation.
+    The id the SCIM server assigns to a group (docker/scim/app.py,
+    stable_id): deterministic, so 25-Bundles.xml can reference SCIM
+    entitlements by id like any real SCIM target - ids are opaque there,
+    the display name comes from the group aggregation.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"scim:group:{name}"))
+
+
+def write_scim_seed(users_path: Path, groups_path: Path, people: list[dict],
+                    disabled: set[str]) -> None:
+    """
+    Seed users and groups for the SCIM target as RFC 7643 resources. The
+    scim container loads both files at start (bind mount), so a `down`
+    costs nothing; externalId carries the employeeNumber for correlation
+    and the group members are listed by that number.
     """
     users = []
     for person in people:
@@ -789,10 +825,17 @@ def write_scim_seed(path: Path, people: list[dict]) -> None:
             "displayName": person["cn"],
             "emails": [{"value": person["mail"], "primary": True, "type": "work"}],
             "title": person["title"],
-            "active": True,
+            "active": person["employeeNumber"] not in disabled,
         })
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(users, indent=2) + "\n", encoding="utf-8", newline="\n")
+    users_path.parent.mkdir(parents=True, exist_ok=True)
+    users_path.write_text(json.dumps(users, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+    groups = []
+    for name in SCIM_GROUPS:
+        members = [p["employeeNumber"] for i, p in enumerate(people)
+                   if name in SCIM_SEED_GROUPS[i % len(SCIM_SEED_GROUPS)]]
+        groups.append({"id": scim_group_id(name), "displayName": name, "members": members})
+    groups_path.write_text(json.dumps(groups, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def main() -> None:
@@ -802,7 +845,7 @@ def main() -> None:
                         help="number of people in the HR CSV (default: 100)")
     parser.add_argument("--groups", type=int, default=50,
                         help="number of LDAP groups (default: 50)")
-    parser.add_argument("--seed-accounts", type=int, default=5,
+    parser.add_argument("--seed-accounts", type=int, default=8,
                         help="people that already have accounts in the targets: "
                              "all of them in LDAP, the first three also in JDBC "
                              "and SCIM (default: 5)")
@@ -846,28 +889,43 @@ def main() -> None:
     seed_uids = {p["uid"] for p in seed_people}
     seed_groups = limit_groups_to_seeds(groups, seed_uids)
 
-    # The first three seed people also get JDBC and SCIM accounts: a
+    # The first five seed people also get JDBC and SCIM accounts: a
     # small cohort that exists in every target, useful for comparing how
     # the connectors report the same person.
-    cross_target = seed_people[:3]
+    cross_target = seed_people[:5]
+
+    # A few seed accounts are disabled in the target, so the aggregation
+    # has to bring the account state across (link IIQDisabled=true) and
+    # not only its existence. The people stay active in HR - a locked
+    # account of an active employee is the realistic case. The last
+    # three LDAP seeds and the last two of the cross-target cohort:
+    # disjoint sets, so no person is disabled everywhere.
+    ldap_disabled = {p["employeeNumber"] for p in seed_people[-3:]}
+    cross_disabled = {p["employeeNumber"] for p in cross_target[-2:]}
 
     write_hr_csv(hr_dir / "HR-people.csv", people)
-    write_users(ldif_dir / "02-users.ldif", seed_people)
+    write_users(ldif_dir / "02-users.ldif", seed_people, ldap_disabled)
     write_groups(ldif_dir / "03-groups.ldif", seed_groups)
-    write_jdbc_seed(repo / "docker" / "postgres" / "04-targetdb-seed.sql", cross_target)
-    write_scim_seed(repo / "data" / "seed" / "scim-users.json", cross_target)
+    write_jdbc_seed(repo / "docker" / "postgres" / "04-targetdb-seed.sql", cross_target,
+                    cross_disabled)
+    write_scim_seed(repo / "data" / "seed" / "scim-users.json",
+                    repo / "data" / "seed" / "scim-groups.json", cross_target,
+                    cross_disabled)
 
     populated = sum(1 for g in seed_groups if g["members"])
     print(f"HR CSV (source):        {len(people):4d} people"
           f"        -> {hr_dir / 'HR-people.csv'}")
     print(f"LDAP accounts (target): {len(seed_people):4d} seed accounts"
+          f" ({len(ldap_disabled)} disabled)"
           f" -> {ldif_dir / '02-users.ldif'}")
     print(f"LDAP groups:            {len(seed_groups):4d} groups"
           f"        -> {ldif_dir / '03-groups.ldif'}")
-    print(f"JDBC seed (target):     {len(cross_target):4d} accounts"
+    print(f"JDBC seed (target):     {len(cross_target):4d} accounts ({len(cross_disabled)} disabled)"
           f"      -> docker/postgres/04-targetdb-seed.sql")
-    print(f"SCIM seed (target):     {len(cross_target):4d} users"
-          f"         -> data/seed/scim-users.json  (apply: scripts/seed-scim.py)")
+    print(f"SCIM seed (target):     {len(cross_target):4d} users ({len(cross_disabled)} disabled)"
+          f"         -> data/seed/scim-users.json")
+    print(f"SCIM groups:            {len(SCIM_GROUPS):4d} groups"
+          f"        -> data/seed/scim-groups.json")
     print()
     print(f"  {populated} groups have seed members, "
           f"{len(seed_groups) - populated} are empty and await provisioning.")

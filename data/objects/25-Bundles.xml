@@ -42,8 +42,12 @@
       get ObjectConfig Bundle
 
   A note on effect: with provision=true in the refresh task IIQ creates
-  the LDAP account as soon as a role is assigned and the employee has no
-  account yet. That is exactly the joiner case.
+  the account as soon as a role is assigned and the employee has no
+  account yet - on whichever target the IT role points at. That is
+  exactly the joiner case. Every target has at least one role here so
+  that the create path of all four connectors is exercised:
+  LDAP (everyone), JDBC (Finance, managers), SCIM (Operations),
+  REST (Human Resources).
   ===========================================================================
 -->
 <sailpoint>
@@ -156,6 +160,118 @@
   </Bundle>
 
   <!-- ===================================================================
+       IT roles: JDBC, SCIM and REST entitlements
+       ===================================================================
+       Same pattern as the LDAP roles. Entitlement values are what the
+       account carries: role names on the JDBC target (IIQAccountRoles),
+       group names on the REST mock (roles), and group *ids* on the SCIM
+       target (groups) - SCIM ids are opaque, the display name
+       comes from "SCIM Group Aggregation". The ids are those the
+       generator writes into data/seed/scim-groups.json (uuid5 of the
+       group name, so they survive a restart and a regeneration).
+  -->
+
+  <Bundle displayName="JDBC Finance Access" name="jdbc-finance-access" type="it">
+    <Description>Read and reporting access in the finance application (JDBC target).</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="JDBC-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="roles">
+            <Value>
+              <List>
+                <String>TARGET_READ</String>
+                <String>TARGET_REPORT</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <Bundle displayName="JDBC Approver Access" name="jdbc-approver-access" type="it">
+    <Description>Approval permission in the finance application (JDBC target), for managers.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="JDBC-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="roles">
+            <Value>
+              <List>
+                <String>TARGET_READ</String>
+                <String>TARGET_APPROVE</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <Bundle displayName="SCIM Operations Access" name="scim-operations-access" type="it">
+    <Description>Planning, dispatch and reporting groups in the operations system (SCIM target).</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="SCIM-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="groups">
+            <Value>
+              <List>
+                <!-- ops-planning -->
+                <String>db1d9865-2fe2-59f2-9c62-074b8f74d72b</String>
+                <!-- ops-dispatch -->
+                <String>d106eed1-18e9-5965-a816-954bf178a1b9</String>
+                <!-- ops-reporting -->
+                <String>c6208f7f-a253-5c28-9651-32f3edd27652</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <Bundle displayName="REST HR Portal Access" name="rest-hr-access" type="it">
+    <Description>Read and write access to the HR portal (REST target).</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Profiles>
+      <Profile>
+        <ApplicationRef>
+          <Reference class="sailpoint.object.Application" name="WebService-Target"/>
+        </ApplicationRef>
+        <Constraints>
+          <Filter operation="CONTAINS_ALL" property="roles">
+            <Value>
+              <List>
+                <String>grp-portal-read</String>
+                <String>grp-portal-write</String>
+              </List>
+            </Value>
+          </Filter>
+        </Constraints>
+      </Profile>
+    </Profiles>
+  </Bundle>
+
+  <!-- ===================================================================
        Business roles: assigned automatically
        =================================================================== -->
 
@@ -221,6 +337,60 @@
     </Requirements>
   </Bundle>
 
+  <Bundle displayName="Finance Staff" name="finance-staff" type="business">
+    <Description>Members of the Finance department. Get an account in the finance application.</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression and="true">
+          <MatchTerm name="department" value="Finance" type="IdentityAttribute"/>
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="jdbc-finance-access"/>
+    </Requirements>
+  </Bundle>
+
+  <Bundle displayName="Operations Staff" name="operations-staff" type="business">
+    <Description>Members of the Operations department. Get an account in the operations system (SCIM).</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression and="true">
+          <MatchTerm name="department" value="Operations" type="IdentityAttribute"/>
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="scim-operations-access"/>
+    </Requirements>
+  </Bundle>
+
+  <Bundle displayName="HR Staff" name="hr-staff" type="business">
+    <Description>Members of Human Resources. Get an account in the HR portal (REST).</Description>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+    <Selector>
+      <IdentitySelector>
+        <MatchExpression and="true">
+          <MatchTerm name="department" value="Human Resources" type="IdentityAttribute"/>
+          <MatchTerm name="hrStatus" value="active" type="IdentityAttribute"/>
+        </MatchExpression>
+      </IdentitySelector>
+    </Selector>
+    <Requirements>
+      <Reference class="sailpoint.object.Bundle" name="rest-hr-access"/>
+    </Requirements>
+  </Bundle>
+
   <!--
     Managers: active AND (department-head OR team-lead). The OR is a
     container term with and="false"; the outer expression ANDs it with
@@ -245,6 +415,7 @@
     </Selector>
     <Requirements>
       <Reference class="sailpoint.object.Bundle" name="ldap-manager-access"/>
+      <Reference class="sailpoint.object.Bundle" name="jdbc-approver-access"/>
     </Requirements>
   </Bundle>
 

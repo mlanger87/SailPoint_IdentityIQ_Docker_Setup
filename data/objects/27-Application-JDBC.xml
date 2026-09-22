@@ -215,7 +215,7 @@
             </Script>
           </Field>
 
-          <Field name="Status" type="string" value="aktiv"/>
+          <Field name="Status" type="string" value="active"/>
         </Section>
       </Form>
     </ProvisioningForms>
@@ -271,7 +271,7 @@
           <Description>Employment type</Description>
         </AttributeDefinition>
         <AttributeDefinition name="Status" type="string">
-          <Description>aktiv or inaktiv (target-system status values)</Description>
+          <Description>active or disabled (the target's own status values)</Description>
         </AttributeDefinition>
         <!--
           Multi-valued and flagged as entitlement: these values appear in

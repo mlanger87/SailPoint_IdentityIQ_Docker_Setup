@@ -28,10 +28,7 @@ copy SailPoint_identityiq-8.5_Software_Package.zip installer\
 docker compose up -d
 docker compose logs -f iiq-init
 
-# 4. seed the SCIM target (its data lives in the container; redo after every `down`)
-python scripts\seed-scim.py
-
-# 5. verify
+# 4. verify
 bash scripts/verify.sh
 ```
 
@@ -57,7 +54,7 @@ All ports bind to `127.0.0.1`. Change them in `.env`.
 ## Daily use
 
 ```powershell
-.\scripts\iiq.ps1 status | console | import | logs | psql | shell | restart | seed-scim | reset
+.\scripts\iiq.ps1 status | console | import | logs | psql | shell | restart | reset
 ```
 
 Ports and credentials shown by the scripts come from `.env` via `scripts/env.sh` /
@@ -80,17 +77,27 @@ Ports and credentials shown by the scripts come from `.env` via `scripts/env.sh`
 | Object | Kind | Backing store | Seed data |
 |---|---|---|---|
 | `HR-Application` | **authoritative source**, DelimitedFile | `data/hr/HR-people.csv` (bind-mounted, edits are live) | 100 people |
-| `LDAP-Target` | target, LDAP | `openldap` | 5 accounts, 50 groups |
-| `JDBC-Target` | target, JDBC | `targetdb` in the same Postgres | 3 accounts (generated), 6 roles |
-| `SCIM-Target` | target, SCIM 2.0 | `scim` | 3 users (`seed-scim.py`) |
-| `WebService-Target` | target, generic REST | `mockapi` | 4 accounts, 5 groups |
+| `LDAP-Target` | target, LDAP | `openldap` | 8 accounts (3 disabled), 50 groups |
+| `JDBC-Target` | target, JDBC | `targetdb` in the same Postgres | 5 accounts (2 disabled), 6 roles |
+| `SCIM-Target` | target, SCIM 2.0 | `scim` (own image, `docker/scim`) | 5 users (2 disabled), 6 groups |
+| `WebService-Target` | target, generic REST | `mockapi` | 6 accounts (2 disabled), 5 groups |
 
 Targets are almost empty on purpose: IIQ creates the accounts. The few seed accounts
-exist so correlation (existing account meets new identity) is exercised as well.
+exist so correlation (existing account meets new identity) is exercised as well, and
+some of them start disabled in the target (LDAP `pwdAccountLockedTime`, JDBC
+`Status=disabled`, SCIM `active=false`, REST `status=DISABLED`) so the account state
+reaches IIQ, not only the account.
 Correlation key everywhere, including the HR source, is the personnel number
 (`employeeNumber`). Identities are named `first.last`; a namesake gets the personnel
 number appended (`daniel.morgan`, `daniel.morgan.1030`), the display name stays the
 full name.
+
+Roles (`data/objects/25-Bundles.xml`) are assigned from HR attributes and drive the
+account creation on every target: `employee` (everyone active) → LDAP basic groups;
+`it-staff`, `sales-staff` → more LDAP groups; `manager` → LDAP manager groups and the
+JDBC approver role; `finance-staff` → JDBC roles; `operations-staff` → SCIM groups;
+`hr-staff` → REST portal groups. Each business role requires one IT role that carries
+the entitlements of exactly one target.
 
 ### The HR feed
 
@@ -133,7 +140,7 @@ this order:
 1. HR Aggregation — creates the identities
 2. LDAP Group Aggregation, then LDAP Account Aggregation
 3. JDBC Aggregation
-4. SCIM Aggregation
+4. SCIM Group Aggregation, then SCIM Aggregation
 5. WebService Group Aggregation, then WebService Aggregation
 6. Refresh Identity Cube — roles, manager status, lifecycle triggers, provisioning
 
@@ -147,11 +154,12 @@ finishes — `quit` kills the scheduler.
 python scripts\generate-testdata.py --users 250 --groups 80 --seed-accounts 10
 ```
 
-Writes the CSV, both LDIFs, the JDBC seed SQL and the SCIM seed JSON from one person
-list; the fixed seed makes the output reproducible, and the first three LDAP seed people
-also exist in JDBC and SCIM. Minimum `--users` is 16 (8 departments × 2). The CSV is
-live (bind mount); the LDIFs and the JDBC seed load only into an empty volume; SCIM is
-re-seeded with `scripts/seed-scim.py`:
+Writes the CSV, both LDIFs, the JDBC seed SQL and the SCIM seed JSON (users and
+groups) from one person list; the fixed seed makes the output reproducible, and the
+first five LDAP seed people also exist in JDBC and SCIM. Minimum `--users` is 16
+(8 departments × 2). The CSV and the SCIM seed are live (bind mounts; the SCIM server
+re-reads its seed on `docker compose restart scim`); the LDIFs and the JDBC seed load
+only into an empty volume:
 
 ```powershell
 docker compose rm -sf openldap; docker volume rm iiq85_ldapdata; docker compose up -d openldap
@@ -170,12 +178,12 @@ installer/                    the SailPoint ZIP (gitignored)
 docker/iiq/                   Tomcat 9 + JDK 21 image, entrypoint, patch scripts
 docker/postgres/              PG 17 image with IIQ DDL and targetdb as initdb hooks
 docker/mockapi/               REST mock (stdlib Python, ~50 MB image)
+docker/scim/                  SCIM 2.0 server (stdlib Python, same construction)
 docker/openldap/ldif/         01-structure (hand-written), 02/03 (generated)
 data/objects/                 IIQ objects, imported in prefix order on every init
 data/hr/                      HR CSV (generated)
-data/seed/                    SCIM seed users (generated)
+data/seed/                    SCIM seed users and groups (generated, read by scim)
 scripts/env.sh, env.ps1       single source for ports/credentials on the host
-scripts/seed-scim.py          replays data/seed into the SCIM server
 data/plugins/, data/certs/    mounted read-only into iiq
 scripts/                      setup, verify, iiq wrapper, test-data generator
 ```
@@ -192,6 +200,7 @@ Containers: `postgres`, `iiq-init` (runs once, exits), `iiq`, `mailpit`, `openld
 | Login page HTTP 000 right after start | Tomcat needs 1–3 min. `docker compose logs -f iiq`. |
 | Aggregation "Success" but 0 accounts / 0 roles / no manager | Silent misconfiguration — see the pattern in CLAUDE.md. Compare expected vs. actual with an isolated rule/filter call. |
 | Task stuck "running" after a crash | `UPDATE spt_task_result SET completion_status='Terminated' WHERE completion_status IS NULL;` |
+| REST create/update fails, unclear what was sent | The override sets `LOG_BODIES=true` on the mock: `docker compose logs mockapi` shows every request body. |
 | `Container name is already in use`, but `docker rm` finds nothing | `docker compose down --remove-orphans` (no `-v`). If `docker ps` hangs: restart Docker Desktop; volumes survive. Never force-kill it. |
 | `exec format error` on a third-party image | containerd store picks the first manifest platform. `platform: linux/amd64`, or another image. |
 | `bad interpreter` in a container | CRLF. `git ls-files --eol scripts/` must show `i/lf w/lf`. |

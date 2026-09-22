@@ -39,14 +39,14 @@ The IIQ installation package is licensed and **not** in the repository. Drop it 
 - **Ports and credentials on the host side come from `scripts/env.sh` / `env.ps1`**
   (`.env` with the compose defaults). Do not hard-code a port or URL in a script again;
   that is how SCIM and the mock API went missing from four copies of the endpoint list.
-- **After `docker compose down`, re-seed SCIM:** `python scripts/seed-scim.py` (or
-  `.\scripts\iiq.ps1 seed-scim`). The SCIM server keeps its data in the container
-  layer; Postgres, LDAP and the mock re-seed themselves from initdb hooks, LDIFs and the
-  live CSV.
+- **Every target re-seeds itself:** Postgres from initdb hooks (empty volume only),
+  LDAP from the LDIFs (empty volume only), the REST mock from the live CSV and the SCIM
+  server from `data/seed/*.json` on every start. Nothing has to be replayed by hand
+  after a `down`.
 - **Generated artifacts are committed but never hand-edited:** `data/hr/HR-people.csv`,
   `docker/openldap/ldif/02-users.ldif`, `03-groups.ldif`,
-  `docker/postgres/04-targetdb-seed.sql`, `data/seed/scim-users.json`. Change the
-  generator. One person list feeds every target; the first three LDAP seed people also
+  `docker/postgres/04-targetdb-seed.sql`, `data/seed/scim-users.json`,
+  `data/seed/scim-groups.json`. Change the generator. One person list feeds every target; the first five LDAP seed people also
   exist in JDBC and SCIM.
 - **Before editing a shell script on Windows:** `git ls-files --eol scripts/` must show
   `i/lf w/lf`. A literal CR byte anywhere flips the file to binary and disables
@@ -142,8 +142,13 @@ Fixed `SEED` → identical data on every run → comparable IIQ test runs.
 
 **Targets are nearly empty.** The HR CSV is the source of identities; LDAP, JDBC, SCIM
 and the REST mock are targets where IIQ creates accounts. Each keeps a handful of seed
-accounts so the correlation path is exercised too, not only the create path. Groups and
-roles in the targets are complete — they are the entitlements IIQ assigns.
+accounts so the correlation path is exercised too, not only the create path, and two or
+three of them start disabled so the account *state* is aggregated as well: the LDAP
+entry carries `pwdAccountLockedTime`, JDBC `Status=disabled` becomes `IIQDisabled` in
+the BuildMap rule, SCIM `active=false` is mapped by the connector, the REST mock
+exposes a boolean `disabled` mapped to `IIQDisabled` (the connector cannot derive it
+from the `status` string). Groups and roles in the targets are complete — they are the
+entitlements IIQ assigns.
 
 **Ports bind to `127.0.0.1`.** Docker publishes on `0.0.0.0` by default; on a laptop in
 a customer or hotel network the database would be reachable by everyone. The JDWP
@@ -158,8 +163,7 @@ no-new-privileges` on every service; `cap_drop: [ALL]` on the three images we bu
 privileges themselves. `ADD` of the JDBC driver carries `--checksum=sha256:…`
 (cross-checked against Maven Central's `.sha1`); bumping `PG_JDBC_VERSION` means
 updating the hash. Every third-party image is pinned by tag or digest; `dnknth/ldap-ui`
-and `harrykodden/scim` by digest because they are personal namespaces with mutable
-tags.
+by digest because it is a personal namespace with mutable tags.
 
 **Secrets never go to stdout.** The mock prints `Bearer token: set`, not the value —
 `docker compose logs` ends up in log exports. (Reference project C `cat`s
@@ -177,10 +181,10 @@ only from `.env`, not from another service's `environment` block.
 | Object | Type | Role | Seed data |
 |---|---|---|---|
 | `HR-Application` | DelimitedFile, `authoritative="true"` | source | 100 people, `data/hr/HR-people.csv` |
-| `LDAP-Target` | LDAPConnector | target | 5 accounts, 50 groups |
-| `JDBC-Target` | JDBCConnector → `targetdb` in the same Postgres | target | 3 accounts, 6 roles |
-| `SCIM-Target` | OpenConnectorAdapter / SCIM2Connector → `scim` container | target | 3 accounts |
-| `WebService-Target` | WebServicesConnector → `mockapi` container | target | 4 accounts, 5 groups |
+| `LDAP-Target` | LDAPConnector | target | 8 accounts (3 disabled), 50 groups |
+| `JDBC-Target` | JDBCConnector → `targetdb` in the same Postgres | target | 5 accounts (2 disabled), 6 roles |
+| `SCIM-Target` | OpenConnectorAdapter / SCIM2Connector → `scim` container (own image) | target | 5 accounts (2 disabled), 6 groups |
+| `WebService-Target` | WebServicesConnector → `mockapi` container | target | 6 accounts (2 disabled), 5 groups |
 
 Correlation everywhere is `employeeNumber` (identity) = personnel number on the
 account (`employeeNumber`, `IIQID`, `externalId`, `employeeId` respectively).
@@ -197,14 +201,15 @@ otherwise rows contradict each other. Verified: 10 inactive = exactly 6 future j
 database shows 0 runs; the live test in the README shows one each.
 
 **Task order for a fresh database** (Setup → Tasks): HR Aggregation → LDAP Group
-Aggregation → LDAP Account Aggregation → JDBC Aggregation → SCIM Aggregation →
-WebService Group/Account Aggregation → Refresh Identity Cube. Groups before accounts,
-or entitlements reference unknown groups and get no display name.
+Aggregation → LDAP Account Aggregation → JDBC Aggregation → SCIM Group Aggregation →
+SCIM Aggregation → WebService Group/Account Aggregation → Refresh Identity Cube. Groups
+before accounts, or entitlements reference unknown groups and get no display name.
 
 ## Reference run
 
-Measured on 2026-09-22 from `docker compose down -v` through the eight tasks; this is
-what a correct fresh setup looks like. Anything else is a regression.
+Measured on 2026-09-22 from `docker compose down -v` (fresh volumes, rebuilt images)
+through the nine tasks and `verify.sh`; this is what a correct fresh setup looks
+like. Anything else is a regression.
 
 | Metric | Value | Why |
 |---|---|---|
@@ -212,24 +217,27 @@ what a correct fresh setup looks like. Anything else is a regression.
 | with manager | 92 | every CSV row with `managerEmployeeNumber` |
 | inactive | 10 | 6 future joiners + 4 leavers |
 | open workflow cases / forms | 0 / 0 | no stuck provisioning |
-| provisioning transactions | 270, all `Success` | 85 LDAP `Create`, 5 LDAP `Modify` (seed accounts get groups), 180 `IdentityIQ` role assignments |
-| LDAP-Target links = directory entries | 90 | 5 seed + 85 created; 90 active people |
-| roles | employee 90, it-staff 19, sales-staff 18, manager 18 | exact CSV counts |
+| provisioning transactions | 322, all `Success` | 180 `IdentityIQ` role assignments; `Create` 82 LDAP, 24 JDBC, 16 SCIM, 9 REST; `Modify` 8 LDAP, 2 JDBC, 1 SCIM (seed accounts get their entitlements) |
+| LDAP-Target links = directory entries | 90 | 8 seed + 82 created; 90 active people |
+| JDBC / SCIM / WebService links | 29 / 21 / 15 | 5 + 24, 5 + 16, 6 + 9 (seed + role-driven creates) |
+| disabled links LDAP / JDBC / SCIM / REST | 3 / 2 / 2 / 2 | the disabled seed accounts, state carried by each connector |
+| roles | employee 90, it-staff 19, sales-staff 18, manager 18, operations-staff 17, finance-staff 11, hr-staff 9 | exact CSV counts |
 | leaver / joiner workflow runs | 0 / 0 | triggers fire on transitions; see the lifecycle pitfall |
 
 The three items that were open before this run — roles at 0, manager empty, the
 Daniel Morgan merge — are closed; their root causes are recorded under Pitfalls
 (`MatchExpression` OR default, `noManagerCorrelation`/`alwaysRefreshManager`, HR
-correlation and naming). SCIM correlation was never broken: the three seed users
+correlation and naming). SCIM correlation was never broken: the seed users
 correlate once the identities exist, i.e. after `HR Aggregation`.
 
 Verified afterwards on the same database with the CSV edit from the README
-(one active person, `endDate` yesterday): one `HR Leaver: <name>` run, LDAP entry
-gets `pwdAccountLockedTime: 000001010000Z`, REST account `status=DISABLED`, both
+(one active person, `endDate` yesterday): one `HR Leaver: <name>` run, the LDAP
+entry gets `pwdAccountLockedTime: 000001010000Z`, the REST account
+`status=DISABLED` (PATCH with a real body — the mock now rejects empty ones), the
 links `iiqDisabled=true`; row restored: one `HR Joiner: <name>` run, the lock value
-removed, REST `ACTIVE`, both links enabled, every provisioning transaction `Success`.
-Not verified: JDBC/SCIM/REST *creates* — no role grants them, the roles only carry
-LDAP entitlements, so those targets keep their seed accounts.
+removed, REST `ACTIVE`, the links enabled, every provisioning transaction `Success`.
+Role-driven creates on JDBC, SCIM (with group membership) and REST (with roles) are
+part of the fresh run above.
 
 ## Pitfalls
 
@@ -398,6 +406,14 @@ Dump it with `dtd /tmp/sp.dtd` in the console. Findings from 8.5:
   run at aggregation time. To see the leaver: change a row's `endDate`/`status` in
   the live CSV, run `HR Aggregation`, then the refresh — one workflow, accounts
   disabled. Undo the row and repeat: one joiner, accounts enabled.
+- **Every refresh with provisioning logs one `Modify` transaction per account, even
+  when nothing changes.** The plan compiler filters the role entitlements the link
+  already has (`FilterReason Exists`); the remaining `AccountRequest` carries no
+  `AttributeRequest`, nothing reaches the connector, the transaction is still
+  recorded as `committed`. Measured: +90 LDAP, +26 JDBC, +17 SCIM, +9 REST, +90
+  `IdentityIQ` per `Refresh Identity Cube` on an unchanged database, all `Success`.
+  Growth in `spt_provisioning_transaction` is therefore not a regression signal;
+  a non-`Success` status or a real `AttributeRequest` in the `request` entry is.
 - **Task results are replaced, not appended.** `resultAction` defaults to `Delete`; a
   second `run` of a task drops the earlier `spt_task_result` row and creates a new
   one. Polling "row exists" is therefore not enough for a re-run — compare `created`
@@ -445,6 +461,10 @@ is not available in the Bitnami image. The group schema's `nativeObjectType` and
 production export used `groupOfUniqueNames`/`uniqueMember` and would aggregate nothing.
 LDIFs load **only into an empty volume**: `docker compose rm -sf openldap &&
 docker volume rm iiq85_ldapdata && docker compose up -d openldap`.
+**Aggregation derives `IIQDisabled` from `revokeAttr`/`revokeVal`**: an entry seeded
+with `pwdAccountLockedTime: 000001010000Z` (an operational attribute, but `ldapadd`
+as the admin accepts it) arrives as a disabled link; the three disabled LDAP seed
+accounts rely on that.
 **Disable and Enable need three application entries each, plus the ppolicy
 overlay.** `ENABLE` in `featuresString` only advertises the operations; without
 `revokeAttr` the connector throws `No revoke attribute specified. Operation not
@@ -468,15 +488,45 @@ unpacked WAR.
 case column names are deliberate — Postgres folds unquoted identifiers, so every
 statement must quote them; a realistic porting trap. Five `JDBCProvision` rules plus a
 `JDBCBuildMap` rule because roles live in a join table; the built-in SQL path cannot do
-that.
+that. Status values are `active`/`disabled`, a contract between the DDL, the rules,
+the application and the generator.
+**The identity attribute is not in the create plan's attribute requests.** The
+Provisioner moves the value of the schema's `identityAttribute` (`IIQID`) out of the
+`AttributeRequest`s into `AccountRequest.nativeIdentity`, even though the create policy
+sets it as a field. A create rule that reads it from the attribute map fails for
+every role-driven create — measured: 29 `IIQID missing` failures, each request
+carrying `nativeIdentity="10xx"`. Read `request.getNativeIdentity()` first.
 
 **SCIM 2.0.** `authType="oauthBearer"` for a static token. `oauth2` maps to
 `OAuth2Login` (full token flow) and yields `401 invalidCredentials`. Constants:
 `javap -p -constants openconnector/connector/scim2/SCIM2Constants.class`.
 `Class.forName("openconnector.connector.scim2.SCIM2Connector")` throws
 `ClassNotFoundException` although the class is in `connector-bundle-webservices.jar` —
-`OpenConnectorAdapter` uses its own class loader. Only `connectorDebug "<app>" test`
-is meaningful.
+`OpenConnectorAdapter` uses its own class loader. `connectorDebug "<app>" test`,
+`iterate` and `iterate group` are the reliable checks; they print the ResourceObjects
+exactly as the aggregator sees them.
+- **The entitlement attribute must be named `groups`, not `groups.value`.** The
+  connector maps the schema name `groups` to the JSON path `groups[*].value`
+  (`SCIM2Constants.JSON_PATH_GROUPS`); any other name is requested from the server
+  but never mapped. Measured: with `groups.value` the aggregation was `Success` and
+  the link had no entitlement at all; `iterate` shows `groups` as a list of ids
+  after the rename. Nested single values (`name.givenName`) work with the dotted
+  name; the multi-valued `emails.value` is not mapped either and stays empty —
+  irrelevant here, correlation runs on `externalId`.
+- **Renaming an entitlement attribute strands its `ManagedAttribute`s.** They keep
+  the old `attribute` value, the next group aggregation tries to insert the same
+  values under the new name and fails with `duplicate key value violates unique
+  constraint uk_…` for every group (task result `Error`). Delete the old ones with
+  `Terminator` from a temporary rule, then aggregate again.
+- **`skipGrpUpdate` must be `false`.** An 8.5 UI export carries `true`; the
+  connector then skips `modifyGroups()` (PATCH `/Groups/{id}` members) entirely
+  and role-driven group assignments never reach the server.
+- **The server must derive `groups` on the User.** The third-party server used
+  first (`harrykodden/scim`) keeps membership only on the Group; the connector
+  reads account entitlements only from the User's `groups`. Measured: group PATCH
+  200, group aggregation creates the `ManagedAttribute`, account aggregation finds
+  zero entitlements. Replaced by `docker/scim/app.py`, which computes `groups`
+  from `Groups.members` on every read (RFC 7643 §4.1.2).
 
 **Web Services.** Reference is `WEB-INF/config/connector/WebServices.xml` (the UI form
 definition). `authenticationMethod`: `BasicLogin | OAuthLogin | OAuth2Login | No Auth`.
@@ -485,9 +535,16 @@ Group Aggregation | Get Object | Get Object-Group | Create Account | Update Acco
 Delete Account | Enable Account | Disable Account`. Traps, each found by starting from a
 minimal application that worked and adding one thing at a time:
 - `responseCode` entries must be `<Integer>`; `<String>` → `ClassCastException`.
-- Body field name depends on `bodyFormat`: `raw` → **`rawBody`**, `json` → `jsonBody`.
-  The wrong one NPEs in `WebServiceFacadeV2.initInternal`; the console prints only
-  `null`.
+- **The body text lives under `jsonBody`, whatever the format.** `bodyFormat` is
+  `raw` or `formData` (form `config/connector/WebServices.xml`, fields `jsonBody` and
+  `bodyFormData`); there is no `rawBody`. A `rawBody` entry is ignored without a
+  message and the request goes out with `payload=null` — visible only with
+  `logger.<x>.name=sailpoint.connector.webservices` at `trace` in
+  `log4j2.properties`. Measured: every role-driven create answered `Missing required
+  field: login` while the plan carried `login`; the leaver's Disable was "Success"
+  because the mock accepted an empty PATCH with 200 (it rejects that now).
+  `bodyFormat=json` does not exist: it fails in `initInternal` with a bare
+  `ConnectorException`.
 - `rootPath` belongs on the endpoint map (UI menu "Response Information"), not inside
   `resMappingObj`.
 - The account `resMappingObj` must map the schema's `identityAttribute` by its own name
@@ -496,6 +553,31 @@ minimal application that worked and adding one thing at a time:
 - `paginationSteps` is a URL fragment (a `textarea` in the form), not a keyword. The
   value `offset` is not recognized and the connector loops: **11,943 requests** before
   the task was killed. Omit paging for small data sets.
+- **The `encrypted` attribute list must exist on the application.** Every UI export
+  carries it; without it any endpoint that has a `jsonBody` fails before the first
+  request: `maskSecretAttributeInBody()` does `encryptedList.add("password")` and
+  `Util.csvToList(null)` returns an immutable empty list →
+  `UnsupportedOperationException`, reported as a bare `ConnectorException` from
+  `initInternal`. Measured; the trace log names `getSortedEndPointsForV2`. Any
+  non-empty value works (`password,accesstoken,…`).
+- **Turn on the connector trace to see requests.** Append
+  `logger.ws.name=sailpoint.connector.webservices` / `logger.ws.level=trace` and
+  `logger.c.name=connector` / `logger.c.level=debug` to `WEB-INF/classes/log4j2.properties`
+  (a console run picks it up at start); the dump line
+  `==> Dumping request for troubleshooting purposes` shows URL, headers and `payload`.
+  Together with `LOG_BODIES=true` on the mock that settles every body question in one
+  run instead of guessing.
+- **The create response mapping must map the identity attribute by its own name**
+  (`id` → `id`), the same rule as for aggregation. With `nativeIdentity` → `id` alone
+  the connector parses the id, still logs (trace only) `Native identity is neither
+  present in the plan nor in the response`, reports `committed` and skips the
+  Add Entitlement calls that belong to the create. Measured: nine accounts created,
+  none with a role; with the extra mapping: create 201, one `POST …/roles` per value.
+- **Never put a multi-valued `$plan.x$` into a raw body.** The list is rendered as a
+  JSON string inside a one-element array with double-escaped quotes
+  (`["[\"a\",\"b\"]"]`), which is not valid JSON. Entitlements belong to the
+  Add/Remove Entitlement endpoints; `createAccountWithEntReq` only moves them into the
+  create map and produces exactly that output.
 - **Entitlements are deltas.** IIQ's Modify sends Add/Remove of single values, never the
   full list. An `Update Account` body with `{"roles": $plan.roles$}` overwrites the
   list: adding one role wipes the others, removing one *assigns* it. Use the

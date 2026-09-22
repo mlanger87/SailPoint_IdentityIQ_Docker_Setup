@@ -3,6 +3,28 @@
     "schemas": [
       "urn:ietf:params:scim:schemas:core:2.0:User"
     ],
+    "userName": "sandra.taylor",
+    "externalId": "1016",
+    "name": {
+      "givenName": "Sandra",
+      "familyName": "Taylor",
+      "formatted": "Sandra Taylor"
+    },
+    "displayName": "Sandra Taylor",
+    "emails": [
+      {
+        "value": "sandra.taylor@example.com",
+        "primary": true,
+        "type": "work"
+      }
+    ],
+    "title": "Officer",
+    "active": true
+  },
+  {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User"
+    ],
     "userName": "daniel.hughes",
     "externalId": "1031",
     "name": {
@@ -25,6 +47,28 @@
     "schemas": [
       "urn:ietf:params:scim:schemas:core:2.0:User"
     ],
+    "userName": "michael.phillips",
+    "externalId": "1054",
+    "name": {
+      "givenName": "Michael",
+      "familyName": "Phillips",
+      "formatted": "Michael Phillips"
+    },
+    "displayName": "Michael Phillips",
+    "emails": [
+      {
+        "value": "michael.phillips@example.com",
+        "primary": true,
+        "type": "work"
+      }
+    ],
+    "title": "Associate",
+    "active": true
+  },
+  {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User"
+    ],
     "userName": "irene.evans",
     "externalId": "1064",
     "name": {
@@ -41,7 +85,7 @@
       }
     ],
     "title": "Specialist",
-    "active": true
+    "active": false
   },
   {
     "schemas": [
@@ -63,6 +107,6 @@
       }
     ],
     "title": "Department Head",
-    "active": true
+    "active": false
   }
 ]

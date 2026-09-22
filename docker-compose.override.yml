@@ -6,6 +6,8 @@
 #
 #   - Java debugger port (JDWP) for remote debugging from the IDE
 #   - log directory as bind mount, so logs open directly in the editor
+#   - request-body logging on the REST mock, to see what the Web Services
+#     connector really sends (docker compose logs mockapi)
 #
 # NOT here: IIQ debug pages. -Dsailpoint.debugPages=true comes from
 # IIQ_EXTRA_OPTS in .env and is appended by the BASE compose file, so it
@@ -50,3 +52,7 @@ services:
       - ./data/plugins:/data/plugins:ro
       - ./data/certs:/data/certs:ro
       - ./data/logs:/usr/local/tomcat/logs
+
+  mockapi:
+    environment:
+      LOG_BODIES: "true"

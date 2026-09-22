@@ -41,15 +41,17 @@
        and still reports success.
 
     3. $plan.* / $response.*: the placeholders through which values reach
-       the body. A typo in them goes unnoticed; the field is simply sent
-       empty.
+       the body. A placeholder that resolves to nothing is left in place
+       and the connector then drops the WHOLE body, not just the field.
 
-    4. The name of the body field depends on bodyFormat:
-           bodyFormat="raw"   ->  rawBody
-           bodyFormat="json"  ->  jsonBody
-       The wrong name makes the facade initialization abort with a
-       NullPointerException; the console reports only "null", with no
-       hint at the cause.
+    4. The body text always sits under the key jsonBody; bodyFormat is
+       "raw" or "formData" (see the form config/connector/WebServices.xml).
+       There is no rawBody: such an entry is ignored without a message
+       and the request is sent with no body at all. Measured as
+       "Missing required field: login" on every create while the plan
+       carried the value; only the connector trace log (payload=null)
+       showed why. bodyFormat="json" does not exist either - the facade
+       initialization aborts with a bare ConnectorException.
   ===========================================================================
 -->
 <sailpoint>
@@ -74,6 +76,17 @@
 
     <Attributes>
       <Map>
+        <!--
+          The list of attributes IIQ stores encrypted. Every UI export
+          carries it; hand-written applications tend to omit it, and
+          then any endpoint with a jsonBody dies before the first
+          request: the connector does encryptedList.add("password") on
+          the parsed list, and Util.csvToList(null) returns an immutable
+          empty list -> UnsupportedOperationException, surfaced as a bare
+          ConnectorException (measured; only the trace log names
+          getSortedEndPointsForV2). Any non-empty value works.
+        -->
+        <entry key="encrypted" value="password,accesstoken,refresh_token,client_secret,private_key,private_key_password,oauth_token_info"/>
         <entry key="genericWebServiceBaseUrl" value="http://mockapi:8000"/>
 
         <!--
@@ -182,6 +195,8 @@
                       <entry key="department" value="department"/>
                       <entry key="office" value="office"/>
                       <entry key="status" value="status"/>
+                      <!-- boolean from the API; IIQDisabled cannot be derived from a string -->
+                      <entry key="IIQDisabled" value="disabled"/>
                       <entry key="roles" value="roles"/>
                     </Map>
                   </value>
@@ -283,6 +298,8 @@
                       <entry key="department" value="department"/>
                       <entry key="office" value="office"/>
                       <entry key="status" value="status"/>
+                      <!-- boolean from the API; IIQDisabled cannot be derived from a string -->
+                      <entry key="IIQDisabled" value="disabled"/>
                       <entry key="roles" value="roles"/>
                     </Map>
                   </value>
@@ -314,7 +331,7 @@
                   <value>
                     <Map>
                       <entry key="bodyFormat" value="raw"/>
-                      <entry key="rawBody">
+                      <entry key="jsonBody">
                         <value>
                           <String><![CDATA[{
   "login": "$plan.login$",
@@ -341,9 +358,20 @@
                     </List>
                   </value>
                 </entry>
+                <!--
+                  The response mapping must name the schema's
+                  identityAttribute by its own name (id -> id), exactly
+                  as in the aggregation mapping. With nativeIdentity
+                  alone the connector logs (trace only) "Native identity
+                  is neither present in the plan nor in the response",
+                  reports the create as committed and silently skips the
+                  Add Entitlement calls that follow a create - measured:
+                  nine HR accounts created, none with a role.
+                -->
                 <entry key="resMappingObj">
                   <value>
                     <Map>
+                      <entry key="id" value="id"/>
                       <entry key="nativeIdentity" value="id"/>
                     </Map>
                   </value>
@@ -382,7 +410,7 @@
                   <value>
                     <Map>
                       <entry key="bodyFormat" value="raw"/>
-                      <entry key="rawBody">
+                      <entry key="jsonBody">
                         <value>
                           <String><![CDATA[{
   "jobTitle": "$plan.jobTitle$",
@@ -428,7 +456,7 @@
                   <value>
                     <Map>
                       <entry key="bodyFormat" value="raw"/>
-                      <entry key="rawBody">
+                      <entry key="jsonBody">
                         <value>
                           <String><![CDATA[{"role": "$plan.roles$"}]]></String>
                         </value>
@@ -489,7 +517,7 @@
                   <value>
                     <Map>
                       <entry key="bodyFormat" value="raw"/>
-                      <entry key="rawBody">
+                      <entry key="jsonBody">
                         <value>
                           <String><![CDATA[{"status": "DISABLED"}]]></String>
                         </value>
@@ -523,7 +551,7 @@
                   <value>
                     <Map>
                       <entry key="bodyFormat" value="raw"/>
-                      <entry key="rawBody">
+                      <entry key="jsonBody">
                         <value>
                           <String><![CDATA[{"status": "ACTIVE"}]]></String>
                         </value>

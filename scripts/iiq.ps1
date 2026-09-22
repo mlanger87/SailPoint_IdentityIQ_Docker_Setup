@@ -8,13 +8,12 @@
     .\scripts\iiq.ps1 logs          # follow IdentityIQ logs
     .\scripts\iiq.ps1 status        # state of all containers
     .\scripts\iiq.ps1 psql          # psql on the IIQ database
-    .\scripts\iiq.ps1 seed-scim     # (re)create the SCIM seed accounts
     .\scripts\iiq.ps1 reset         # reset EVERYTHING (with confirmation)
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('console', 'import', 'logs', 'status', 'psql', 'reset', 'restart', 'shell', 'seed-scim')]
+    [ValidateSet('console', 'import', 'logs', 'status', 'psql', 'reset', 'restart', 'shell')]
     [string]$Command = 'status'
 )
 
@@ -63,14 +62,6 @@ try {
         'restart' {
             Invoke-Compose restart iiq
             Write-Host "IdentityIQ restarted." -ForegroundColor Green
-        }
-
-        'seed-scim' {
-            # The SCIM server keeps its data inside the container; a
-            # `down` wipes it. This re-creates the seed accounts from the
-            # generated data set (idempotent by externalId).
-            python "$PSScriptRoot\seed-scim.py"
-            if ($LASTEXITCODE -ne 0) { throw "seed-scim failed" }
         }
 
         'reset' {

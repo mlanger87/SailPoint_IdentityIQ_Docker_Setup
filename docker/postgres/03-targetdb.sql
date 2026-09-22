@@ -34,9 +34,9 @@ SET search_path TO targetapp, public;
 -- every access - a realistic pitfall the provisioning rules must handle
 -- correctly.
 --
--- Status values 'aktiv'/'inaktiv' are a data contract with
--- data/objects/26-Rules-JDBC.xml and 27-Application-JDBC.xml - do not
--- rename.
+-- Status values 'active'/'disabled' are a data contract with
+-- data/objects/26-Rules-JDBC.xml, 27-Application-JDBC.xml and
+-- scripts/generate-testdata.py - change all four together.
 -- ---------------------------------------------------------------------------
 CREATE TABLE targetapp."IIQData" (
     "ID"             SERIAL PRIMARY KEY,
@@ -52,7 +52,7 @@ CREATE TABLE targetapp."IIQData" (
     "Costcenter"     VARCHAR(64),
     "Location"       VARCHAR(128),
     "EmploymentType" VARCHAR(64),
-    "Status"         VARCHAR(32)  DEFAULT 'aktiv',
+    "Status"         VARCHAR(32)  DEFAULT 'active',
     "Created"        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
     "Modified"       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
 );

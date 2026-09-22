@@ -5,7 +5,7 @@
 # next run. Change the generator instead.
 #
 # Group count: 50
-# Total memberships: 44
+# Total memberships: 73
 #
 # Layout:
 #   dept-*   departments (full membership)
@@ -30,7 +30,7 @@ objectClass: groupOfNames
 objectClass: top
 cn: dept-sales
 description: Department: Sales
-member: cn=placeholder,dc=example,dc=com
+member: uid=staylor,ou=people,dc=example,dc=com
 
 dn: cn=dept-it,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -44,7 +44,7 @@ objectClass: groupOfNames
 objectClass: top
 cn: dept-operations
 description: Department: Operations
-member: cn=placeholder,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 
 dn: cn=dept-finance,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -72,7 +72,7 @@ objectClass: groupOfNames
 objectClass: top
 cn: dept-procurement
 description: Department: Procurement
-member: cn=placeholder,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=dept-legal,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -93,6 +93,7 @@ objectClass: groupOfNames
 objectClass: top
 cn: site-london
 description: Site: London
+member: uid=staylor,ou=people,dc=example,dc=com
 member: uid=dhughes,ou=people,dc=example,dc=com
 member: uid=ievans,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
@@ -103,7 +104,8 @@ objectClass: groupOfNames
 objectClass: top
 cn: site-manchester
 description: Site: Manchester
-member: cn=placeholder,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=org-managers,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -117,10 +119,13 @@ objectClass: groupOfNames
 objectClass: top
 cn: org-all-staff
 description: All employees
+member: uid=staylor,ou=people,dc=example,dc=com
 member: uid=dhughes,ou=people,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 member: uid=ievans,ou=people,dc=example,dc=com
 member: uid=ffisher,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 member: uid=vbaker,ou=people,dc=example,dc=com
 
 dn: cn=app-crm-read,ou=groups,dc=example,dc=com
@@ -129,6 +134,7 @@ objectClass: top
 cn: app-crm-read
 description: CRM: read access
 member: uid=ffisher,ou=people,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 member: uid=vbaker,ou=people,dc=example,dc=com
 
 dn: cn=app-crm-write,ou=groups,dc=example,dc=com
@@ -153,6 +159,7 @@ description: ERP: read access
 member: uid=ffisher,ou=people,dc=example,dc=com
 member: uid=ievans,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=staylor,ou=people,dc=example,dc=com
 
 dn: cn=app-erp-post,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -174,7 +181,9 @@ objectClass: top
 cn: app-dms-read
 description: Document management: read access
 member: uid=ievans,ou=people,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-dms-write,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -182,6 +191,7 @@ objectClass: top
 cn: app-dms-write
 description: Document management: write access
 member: uid=ffisher,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-timesheet,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -191,6 +201,7 @@ description: Time tracking
 member: uid=dhughes,ou=people,dc=example,dc=com
 member: uid=ievans,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=staylor,ou=people,dc=example,dc=com
 
 dn: cn=app-expenses,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -199,6 +210,7 @@ cn: app-expenses
 description: Expense reporting
 member: uid=ffisher,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-personnel-files,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -219,7 +231,7 @@ objectClass: groupOfNames
 objectClass: top
 cn: app-contract-archive
 description: Contract archive (sensitive)
-member: cn=placeholder,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-wiki-read,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -228,7 +240,9 @@ cn: app-wiki-read
 description: Wiki: read access
 member: uid=dhughes,ou=people,dc=example,dc=com
 member: uid=ievans,ou=people,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=staylor,ou=people,dc=example,dc=com
 
 dn: cn=app-wiki-write,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -313,6 +327,7 @@ objectClass: top
 cn: app-wifi-guest
 description: Guest WiFi
 member: uid=dhughes,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-colour-printing,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -320,6 +335,7 @@ objectClass: top
 cn: app-colour-printing
 description: Colour printing
 member: uid=dhughes,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-licence-office,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -327,13 +343,14 @@ objectClass: top
 cn: app-licence-office
 description: Office licence
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=staylor,ou=people,dc=example,dc=com
 
 dn: cn=app-licence-cad,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
 objectClass: top
 cn: app-licence-cad
 description: CAD licence
-member: cn=placeholder,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 
 dn: cn=app-licence-bi,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -347,15 +364,18 @@ objectClass: groupOfNames
 objectClass: top
 cn: app-training-portal
 description: Training portal
+member: uid=mphillips,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
 member: uid=vbaker,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-ordering,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
 objectClass: top
 cn: app-ordering
 description: Ordering system
-member: cn=placeholder,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
+member: uid=vmorgan,ou=people,dc=example,dc=com
 
 dn: cn=app-warehouse,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
@@ -385,7 +405,9 @@ cn: app-video-conferencing
 description: Video conferencing licence
 member: uid=dhughes,ou=people,dc=example,dc=com
 member: uid=ffisher,ou=people,dc=example,dc=com
+member: uid=mphillips,ou=people,dc=example,dc=com
 member: uid=sadams,ou=people,dc=example,dc=com
+member: uid=staylor,ou=people,dc=example,dc=com
 
 dn: cn=app-customer-portal,ou=groups,dc=example,dc=com
 objectClass: groupOfNames

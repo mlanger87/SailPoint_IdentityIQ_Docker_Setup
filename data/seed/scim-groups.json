@@ -1,0 +1,44 @@
+[
+  {
+    "id": "db1d9865-2fe2-59f2-9c62-074b8f74d72b",
+    "displayName": "ops-planning",
+    "members": [
+      "1016",
+      "1054",
+      "1064"
+    ]
+  },
+  {
+    "id": "d106eed1-18e9-5965-a816-954bf178a1b9",
+    "displayName": "ops-dispatch",
+    "members": [
+      "1031",
+      "1073"
+    ]
+  },
+  {
+    "id": "35edff76-88fd-5e7f-8e39-6b8144902615",
+    "displayName": "ops-warehouse",
+    "members": []
+  },
+  {
+    "id": "bb79e4a9-7af6-5191-940f-584df3f3e72d",
+    "displayName": "ops-fleet",
+    "members": []
+  },
+  {
+    "id": "c6208f7f-a253-5c28-9651-32f3edd27652",
+    "displayName": "ops-reporting",
+    "members": [
+      "1016",
+      "1064"
+    ]
+  },
+  {
+    "id": "9685c84e-7e23-569f-86d0-7655ccca7ec1",
+    "displayName": "ops-admin",
+    "members": [
+      "1054"
+    ]
+  }
+]

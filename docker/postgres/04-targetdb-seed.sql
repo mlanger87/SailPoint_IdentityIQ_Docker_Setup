@@ -12,16 +12,24 @@ INSERT INTO targetapp."IIQData"
      "Phone", "Position", "Department", "Costcenter", "Location",
      "EmploymentType", "Status")
 VALUES
-    ('1031', 'dhughes', 'Daniel', 'Hughes', 'Daniel Hughes', 'daniel.hughes@example.com', '+44 20 9988 3155', 'Security Engineer', 'IT', 'CC-2000', 'London', 'staff', 'aktiv'),
-    ('1064', 'ievans', 'Irene', 'Evans', 'Irene Evans', 'irene.evans@example.com', '+44 20 7995 2879', 'Specialist', 'Finance', 'CC-4000', 'London', 'staff', 'aktiv'),
-    ('1073', 'ffisher', 'Frank', 'Fisher', 'Frank Fisher', 'frank.fisher@example.com', '+44 20 8527 1476', 'Department Head', 'Human Resources', 'CC-5000', 'Bristol', 'department-head', 'aktiv');
+    ('1016', 'staylor', 'Sandra', 'Taylor', 'Sandra Taylor', 'sandra.taylor@example.com', '+44 20 4843 4006', 'Officer', 'Sales', 'CC-1000', 'London', 'staff', 'active'),
+    ('1031', 'dhughes', 'Daniel', 'Hughes', 'Daniel Hughes', 'daniel.hughes@example.com', '+44 20 9988 3155', 'Security Engineer', 'IT', 'CC-2000', 'London', 'staff', 'active'),
+    ('1054', 'mphillips', 'Michael', 'Phillips', 'Michael Phillips', 'michael.phillips@example.com', '+44 20 7075 1225', 'Associate', 'Operations', 'CC-3000', 'Manchester', 'staff', 'active'),
+    ('1064', 'ievans', 'Irene', 'Evans', 'Irene Evans', 'irene.evans@example.com', '+44 20 7995 2879', 'Specialist', 'Finance', 'CC-4000', 'London', 'staff', 'disabled'),
+    ('1073', 'ffisher', 'Frank', 'Fisher', 'Frank Fisher', 'frank.fisher@example.com', '+44 20 8527 1476', 'Department Head', 'Human Resources', 'CC-5000', 'Bristol', 'department-head', 'disabled');
 
 INSERT INTO targetapp."IIQAccountRoles" ("IIQID", "RoleName") VALUES
+    ('1016', 'TARGET_READ'),
+    ('1016', 'TARGET_APPROVE'),
+    ('1016', 'TARGET_REPORT'),
     ('1031', 'TARGET_READ'),
-    ('1031', 'TARGET_APPROVE'),
-    ('1031', 'TARGET_REPORT'),
+    ('1031', 'TARGET_WRITE'),
+    ('1031', 'TARGET_ADMIN'),
+    ('1054', 'TARGET_READ'),
+    ('1054', 'TARGET_REPORT'),
     ('1064', 'TARGET_READ'),
-    ('1064', 'TARGET_WRITE'),
-    ('1064', 'TARGET_ADMIN'),
+    ('1064', 'TARGET_APPROVE'),
+    ('1064', 'TARGET_REPORT'),
     ('1073', 'TARGET_READ'),
-    ('1073', 'TARGET_REPORT');
+    ('1073', 'TARGET_WRITE'),
+    ('1073', 'TARGET_ADMIN');

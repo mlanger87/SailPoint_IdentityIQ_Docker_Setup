@@ -295,7 +295,10 @@ services:
       # Basic Auth as alternative - the connector supports both.
       BASIC_USER: ${MOCKAPI_USER:-iiq}
       BASIC_PASSWORD: ${MOCKAPI_PASSWORD:-iiqpassword}
-      SEED_COUNT: "4"
+      SEED_COUNT: "6"
+      # The last two seed accounts start as DISABLED (account state must
+      # reach IIQ, not only existence); same idea on every target.
+      SEED_DISABLED: "2"
     ports:
       - "127.0.0.1:${MOCKAPI_PORT:-8200}:8000"
     volumes:
@@ -306,42 +309,34 @@ services:
   # -------------------------------------------------------------------------
   # SCIM server - third target system
   #
-  # Tool choice:
-  #   - harrykodden/scim: Python implementation of RFC 7643/7644, amd64
-  #     first in the manifest. Tested: serves ServiceProviderConfig,
-  #     supports patch and filter, and accepts created users with
-  #     id/meta/etag - usable as a real target system, not read-only.
-  #   - i2scim (Quarkus) and Apache SCIMple would be alternatives; the
-  #     former is heavier, the latter was unreachable.
+  # Own image (docker/scim), standard library only, like the REST mock.
+  # The third-party server used before (harrykodden/scim) never derived
+  # the read-only "groups" attribute of a User from Groups.members, and
+  # that attribute is the only place the SCIM2Connector reads account
+  # entitlements from - roles with SCIM entitlements could not be
+  # detected. Seed users and groups are loaded at start from data/seed
+  # (generated), so a `down` needs no manual re-seed.
   #
-  # Data lives in the container (flat-file backend). Sufficient for dev;
-  # a container restart resets it, which is more useful than harmful
-  # when testing.
-  #
-  # Auth via bearer token (API_KEY), matching the SCIM 2.0 connector's
-  # authType.
+  # Reachable on the host at http://localhost:${SCIM_PORT}, bearer token
+  # SCIM_API_KEY. Inside the network the application uses http://scim:8000.
   # -------------------------------------------------------------------------
   scim:
-    # Pinned to the digest: the image has no version tags, and "latest"
-    # would change silently on an upstream push - every other image here
-    # is pinned as well.
-    image: harrykodden/scim@sha256:e75540ee0ddd4908c572bd9149331d077d472b3cd91f1773806f2b38fd788a10
-    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/scim/Dockerfile
+    image: iiq-scim:${IIQ_VERSION:-8.5}
     container_name: iiq-scim
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
+    # Own image, uid 1000, binds >1024, needs no capability at all.
+    cap_drop: [ALL]
     environment:
       API_KEY: ${SCIM_API_KEY:-secret}
-      LOGLEVEL: INFO
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ServiceProviderConfig', timeout=3).status==200 else 1)\""]
-      interval: 15s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
     ports:
       - "127.0.0.1:${SCIM_PORT:-8100}:8000"
+    volumes:
+      - ./data/seed:/data/seed:ro
     restart: unless-stopped
     networks: [iiq-net]
 

@@ -4,7 +4,7 @@
   ===========================================================================
   SCIM application: third target system
   ===========================================================================
-  Talks to the container "scim" (harrykodden/scim, RFC 7643/7644).
+  Talks to the container "scim" (docker/scim/app.py, RFC 7643/7644).
 
   The connector comes from connector-bundle-webservices.jar and is loaded
   through the OpenConnectorAdapter. One peculiarity:
@@ -103,9 +103,16 @@
             <Boolean>true</Boolean>
           </value>
         </entry>
+        <!--
+          Group membership is provisioned by patching the group's members
+          (PATCH /Groups/{id}), which is what modifyGroups() in the
+          connector does. skipGrpUpdate=true (the value an 8.5 UI export
+          carries) skips exactly that: entitlements assigned by a role
+          would never reach the server, while the plan reports Success.
+        -->
         <entry key="skipGrpUpdate">
           <value>
-            <Boolean>true</Boolean>
+            <Boolean>false</Boolean>
           </value>
         </entry>
 
@@ -126,6 +133,72 @@
     <Owner>
       <Reference class="sailpoint.object.Identity" name="spadmin"/>
     </Owner>
+
+    <!--
+      Create policy: without it a role-driven create has only the
+      entitlement in the plan; userName is required by the server (400)
+      and externalId is the correlation key - the account would exist
+      but never match its identity on the next aggregation. The dotted
+      names are the schema attribute names; the connector maps them to
+      the nested JSON (name.givenName -> {"name": {"givenName": ...}}).
+    -->
+    <ProvisioningForms>
+      <Form name="Create Account" objectType="account" type="Create">
+        <Attributes>
+          <Map>
+            <entry key="pageTitle" value="Create Account"/>
+          </Map>
+        </Attributes>
+        <Section name="Account">
+          <Field name="externalId" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                return identity.getStringAttribute("employeeNumber");
+              ]]></Source>
+            </Script>
+          </Field>
+          <Field name="userName" required="true" type="string">
+            <Script>
+              <Source><![CDATA[
+                // Same rule as the seed users: local part of the mail
+                // address, which the generator keeps unique.
+                String mail = identity.getEmail();
+                if (mail != null && mail.indexOf("@") > 0) {
+                    return mail.substring(0, mail.indexOf("@"));
+                }
+                return identity.getName().toLowerCase();
+              ]]></Source>
+            </Script>
+          </Field>
+          <Field name="name.givenName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getFirstname();]]></Source>
+            </Script>
+          </Field>
+          <Field name="name.familyName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getLastname();]]></Source>
+            </Script>
+          </Field>
+          <Field name="displayName" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getDisplayableName();]]></Source>
+            </Script>
+          </Field>
+          <Field name="emails.value" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getEmail();]]></Source>
+            </Script>
+          </Field>
+          <Field name="title" type="string">
+            <Script>
+              <Source><![CDATA[return identity.getStringAttribute("jobTitle");]]></Source>
+            </Script>
+          </Field>
+          <Field name="active" type="boolean" value="true"/>
+        </Section>
+      </Form>
+    </ProvisioningForms>
 
     <Schemas>
       <!--
@@ -169,7 +242,7 @@
           <Description>Active or disabled</Description>
         </AttributeDefinition>
         <AttributeDefinition entitlement="true" managed="true" multi="true"
-                             name="groups.value" schemaObjectType="group"
+                             name="groups" schemaObjectType="group"
                              type="string">
           <Description>Group memberships</Description>
         </AttributeDefinition>
@@ -214,6 +287,36 @@
           </value>
         </entry>
         <entry key="correlateEntitlements">
+          <value>
+            <Boolean>true</Boolean>
+          </value>
+        </entry>
+      </Map>
+    </Attributes>
+    <Owner>
+      <Reference class="sailpoint.object.Identity" name="spadmin"/>
+    </Owner>
+  </TaskDefinition>
+
+  <!--
+    Groups before accounts, as with LDAP: the account aggregation turns
+    groups into entitlements, and only an aggregated group gives
+    them a display name.
+  -->
+  <TaskDefinition name="SCIM Group Aggregation"
+                  executor="sailpoint.task.ResourceIdentityScan"
+                  progressMode="Percentage"
+                  resultAction="Delete"
+                  type="AccountGroupAggregation">
+    <Description>Reads the groups of the SCIM target system as entitlements.</Description>
+    <Parent>
+      <Reference class="sailpoint.object.TaskDefinition" name="Account Group Aggregation"/>
+    </Parent>
+    <Attributes>
+      <Map>
+        <entry key="applications" value="SCIM-Target"/>
+        <entry key="aggregationType" value="group"/>
+        <entry key="checkDeleted">
           <value>
             <Boolean>true</Boolean>
           </value>

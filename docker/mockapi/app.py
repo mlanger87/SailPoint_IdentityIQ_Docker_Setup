@@ -54,9 +54,17 @@ BASIC_PASSWORD = os.environ.get("BASIC_PASSWORD", "iiqpassword")
 PORT = int(os.environ.get("PORT", "8000"))
 CSV_PATH = Path(os.environ.get("HR_CSV", "/data/hr/HR-people.csv"))
 
+# Print every request body to the log. Off by default; the compose override
+# turns it on because seeing what the Web Services connector really sends
+# is the fastest way to debug a body template.
+LOG_BODIES = os.environ.get("LOG_BODIES", "").lower() in ("1", "true", "yes")
+
 # How many people from the CSV become seed accounts. As with LDAP and
 # JDBC, the target system is nearly empty - IdentityIQ creates the rest.
 SEED_LIMIT = int(os.environ.get("SEED_COUNT", "4"))
+# The last N seed accounts start as DISABLED, so the aggregation has to
+# carry the account state into IIQ, not only its existence.
+SEED_DISABLED = int(os.environ.get("SEED_DISABLED", "0"))
 
 # Default page size. Deliberately small so the connector's paging is
 # exercised even with few records.
@@ -69,6 +77,16 @@ _groups: dict[str, dict] = {}
 
 def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def public(user: dict) -> dict:
+    """
+    Output view of a user: adds the boolean "disabled" derived from the
+    status. The Web Services connector maps a response field to the
+    reserved IIQDisabled attribute only as a boolean; it cannot compare
+    the status string itself.
+    """
+    return {**user, "disabled": user.get("status") != "ACTIVE"}
 
 
 def load_seed_data() -> None:
@@ -139,7 +157,7 @@ def load_seed_data() -> None:
             "jobTitle": r.get("title", ""),
             "department": r.get("department", ""),
             "office": r.get("location", ""),
-            "status": "ACTIVE",
+            "status": "DISABLED" if i >= SEED_LIMIT - SEED_DISABLED else "ACTIVE",
             "roles": assigned,
             "createdAt": now(),
             "updatedAt": now(),
@@ -223,10 +241,18 @@ class Handler(BaseHTTPRequestHandler):
             self._error(413, f"Body exceeds {self.MAX_BODY} bytes")
             return None
         if length == 0:
-            return {}
+            # A real API rejects a create or update without a body. The Web
+            # Services connector silently sends none when the body template
+            # sits under the wrong key (rawBody instead of jsonBody), and a
+            # tolerant 200 here hid that for the whole leaver/joiner path.
+            self._error(400, "Request body required")
+            return None
+        raw = self.rfile.read(length).decode("utf-8", errors="replace")
+        if LOG_BODIES:
+            print(f"[mockapi] {self.command} {self.path} body: {raw}")
         try:
-            parsed = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
+            parsed = json.loads(raw)
+        except ValueError:
             self._error(400, "Body is not valid JSON")
             return None
         # Callers use .get(); a JSON array or scalar would crash them.
@@ -284,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/v1/users":
             with _lock:
-                items = sorted(_users.values(), key=lambda u: u["employeeId"])
+                items = [public(u) for u in sorted(_users.values(), key=lambda u: u["employeeId"])]
             self._respond(200, self._page(items, query))
             return
 
@@ -295,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
             if user is None:
                 self._error(404, "User not found")
             else:
-                self._respond(200, user)
+                self._respond(200, public(user))
             return
 
         if path == "/api/v1/groups":
@@ -352,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             _users[uid] = created
 
-        self._respond(201, created)
+        self._respond(201, public(created))
 
     # --- roles sub-resource: the delta path IIQ actually uses ------------
     #
