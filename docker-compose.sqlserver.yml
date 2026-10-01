@@ -1,0 +1,132 @@
+# ===========================================================================
+# Overlay: SQL Server 2022 as the IdentityIQ repository
+# ---------------------------------------------------------------------------
+# Everything that differs from the PostgreSQL default lives in this one
+# file. Activate it through COMPOSE_FILE in .env (both lines; the
+# separator is ";" on Windows by default, ":" is set explicitly so the
+# same .env works in PowerShell and Git Bash):
+#
+#   COMPOSE_PATH_SEPARATOR=:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.sqlserver.yml
+#
+# COMPOSE_FILE replaces the automatic loading of the override, hence it
+# is listed explicitly. Then, as for any repository change:
+#
+#   docker compose down -v && docker compose up -d --build
+#
+# PostgreSQL keeps running: it hosts the JDBC target database (targetdb).
+# Its initdb hook skips the IdentityIQ schema here (IIQ_DB_TYPE below),
+# which takes effect on a fresh pgdata volume - another reason for -v.
+#
+# The IIQ image gets its own tag per repository type: switching back and
+# forth must never start an image whose iiq.properties points at the
+# other database. A missing tag makes "up" build it.
+#
+# Compose merges this file key by key into the base: build args,
+# environment entries and depends_on are added or replaced individually,
+# everything else stays as in docker-compose.yml.
+# ===========================================================================
+
+services:
+
+  # -------------------------------------------------------------------------
+  # SQL Server 2022, Developer edition
+  #
+  # Developer edition: full feature set, free, licensed for development
+  # and test only. ACCEPT_EULA=Y accepts Microsoft's license terms on
+  # your behalf - activating this overlay means you agree to them.
+  #
+  # Schema: created once from SailPoint's DDL by docker/mssql/entrypoint.sh;
+  # healthy only after that finished (marker in the data volume).
+  # -------------------------------------------------------------------------
+  mssql:
+    build:
+      context: .
+      dockerfile: docker/mssql/Dockerfile
+      args:
+        IIQ_VERSION: ${IIQ_VERSION:-8.5}
+        IIQ_DB_USER: ${IIQ_DB_USER:-identityiq}
+        IIQ_DB_PASSWORD: ${IIQ_DB_PASSWORD:-identityiq}
+        IIQ_PLUGIN_DB_USER: ${IIQ_PLUGIN_DB_USER:-identityiqPlugin}
+        IIQ_PLUGIN_DB_PASSWORD: ${IIQ_PLUGIN_DB_PASSWORD:-identityiqPlugin}
+        IIQ_AH_DB_USER: ${IIQ_AH_DB_USER:-identityiqah}
+        IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
+    image: iiq-mssql:${IIQ_VERSION:-8.5}
+    # Microsoft publishes amd64 only; explicit, see the exec-format pitfall.
+    platform: linux/amd64
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-SQLServer_DB
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      # sa must meet SQL Server's complexity rules (8+ characters, three
+      # of: upper, lower, digit, symbol) or the server refuses to start.
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-IIQ-dev-Passw0rd}
+      # IIQ requires a case-insensitive collation (Guide p.19). This is
+      # the image default; set explicitly so it cannot change underneath.
+      MSSQL_COLLATION: SQL_Latin1_General_CP1_CI_AS
+      # Without a cap SQL Server takes 80 % of the Docker VM's memory and
+      # starves the two IIQ JVMs.
+      MSSQL_MEMORY_LIMIT_MB: ${MSSQL_MEMORY_LIMIT_MB:-2048}
+    ports:
+      - "127.0.0.1:${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/opt/mssql/.iiq-repository-ready && sqlq -Q 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    restart: unless-stopped
+    networks: [iiq-net]
+
+  # Only the JDBC target system now - the name says so.
+  postgres:
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-PostgreSQL_TargetDB
+    environment:
+      IIQ_DB_TYPE: sqlserver
+
+  iiq-init:
+    build:
+      args:
+        IIQ_DB_TYPE: sqlserver
+    image: iiq-app:${IIQ_VERSION:-8.5}-sqlserver
+    depends_on:
+      mssql:
+        condition: service_healthy
+
+  iiq:
+    build:
+      args:
+        IIQ_DB_TYPE: sqlserver
+    image: iiq-app:${IIQ_VERSION:-8.5}-sqlserver
+    depends_on:
+      mssql:
+        condition: service_healthy
+
+  iiq-batch:
+    image: iiq-app:${IIQ_VERSION:-8.5}-sqlserver
+    depends_on:
+      mssql:
+        condition: service_healthy
+
+  # The three IIQ connections point at SQL Server; the JDBC target
+  # connection stays on PostgreSQL.
+  dbgate:
+    environment:
+      SERVER_iiq: mssql
+      PORT_iiq: "1433"
+      ENGINE_iiq: mssql@dbgate-plugin-mssql
+      SERVER_plugin: mssql
+      PORT_plugin: "1433"
+      ENGINE_plugin: mssql@dbgate-plugin-mssql
+      SERVER_ah: mssql
+      PORT_ah: "1433"
+      ENGINE_ah: mssql@dbgate-plugin-mssql
+    depends_on:
+      mssql:
+        condition: service_healthy
+
+volumes:
+  mssqldata:

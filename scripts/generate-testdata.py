@@ -42,7 +42,7 @@
 #
 # The LDIFs are only loaded into an EMPTY data volume:
 #     docker compose rm -sf openldap
-#     docker volume rm iiq85_ldapdata
+#     docker volume rm sailpoint-identityiq85_ldapdata
 #     docker compose up -d openldap
 # ===========================================================================
 import argparse

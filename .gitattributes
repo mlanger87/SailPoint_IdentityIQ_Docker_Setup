@@ -14,6 +14,7 @@
 entrypoint      text eol=lf
 healthcheck     text eol=lf
 console         text eol=lf
+sqlq            text eol=lf
 Dockerfile      text eol=lf
 *.yml           text eol=lf
 *.yaml          text eol=lf

@@ -8,9 +8,14 @@
 #
 # No "version:" key - deprecated in the Compose spec, current versions
 # emit a warning.
+#
+# Container names (SailPoint_IdentityIQ_8.5-UI, ...-PostgreSQL_DB, ...) are
+# for people reading "docker ps" or Docker Desktop. Scripts never use them:
+# every command goes through the service name (docker compose exec iiq,
+# docker compose exec postgres). Rename freely; keep the service names.
 # ===========================================================================
 
-name: iiq85
+name: sailpoint-identityiq85
 
 # ---------------------------------------------------------------------------
 # Shared pieces of the two IdentityIQ nodes (YAML anchors).
@@ -67,6 +72,11 @@ services:
   # -------------------------------------------------------------------------
   # PostgreSQL 17
   #
+  # Two roles: the IdentityIQ repository (default) and the JDBC target
+  # system (targetdb, always). With docker-compose.sqlserver.yml the
+  # repository moves to SQL Server and this container keeps only the
+  # target role.
+  #
   # Schema is created on the very first start from SailPoint's shipped DDL
   # (see docker/postgres/Dockerfile).
   # POSTGRES_DB is deliberately NOT set - the DDL creates all three
@@ -85,7 +95,7 @@ services:
         IIQ_AH_DB_USER: ${IIQ_AH_DB_USER:-identityiqah}
         IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
     image: iiq-postgres:${IIQ_VERSION:-8.5}
-    container_name: iiq-postgres
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-PostgreSQL_DB
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -132,8 +142,9 @@ services:
       args:
         IIQ_VERSION: ${IIQ_VERSION:-8.5}
         IIQ_PATCH: ${IIQ_PATCH:-}
-        DB_HOST: postgres
-        DB_PORT: "5432"
+        # Repository database. docker-compose.sqlserver.yml overrides this
+        # (and the image tag below); see the header of that file.
+        IIQ_DB_TYPE: postgresql
         IIQ_DB_USER: ${IIQ_DB_USER:-identityiq}
         IIQ_DB_PASSWORD: ${IIQ_DB_PASSWORD:-identityiq}
         IIQ_PLUGIN_DB_USER: ${IIQ_PLUGIN_DB_USER:-identityiqPlugin}
@@ -141,7 +152,7 @@ services:
         IIQ_AH_DB_USER: ${IIQ_AH_DB_USER:-identityiqah}
         IIQ_AH_DB_PASSWORD: ${IIQ_AH_DB_PASSWORD:-identityiqah}
     image: iiq-app:${IIQ_VERSION:-8.5}
-    container_name: iiq-init
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-Init
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -149,8 +160,6 @@ services:
     cap_drop: [ALL]
     environment:
       INIT: "y"
-      DB_HOST: postgres
-      DB_PORT: "5432"
     volumes: *iiq-volumes
     depends_on:
       postgres:
@@ -179,15 +188,13 @@ services:
   iiq:
     build: *iiq-build
     image: iiq-app:${IIQ_VERSION:-8.5}
-    container_name: iiq
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-UI
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
     # Own image, uid 1000, binds >1024, needs no capability at all.
     cap_drop: [ALL]
     environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
       IIQ_NODE: ${IIQ_NODE:-iiq-ui}
       IIQ_HEAP: ${IIQ_HEAP:-3g}
       CATALINA_OPTS: *iiq-catalina-opts
@@ -204,12 +211,10 @@ services:
 
   iiq-batch:
     image: iiq-app:${IIQ_VERSION:-8.5}
-    container_name: iiq-batch
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-Batch
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
       IIQ_NODE: ${IIQ_BATCH_NODE:-iiq-batch}
       IIQ_HEAP: ${IIQ_BATCH_HEAP:-3g}
       CATALINA_OPTS: *iiq-catalina-opts
@@ -239,7 +244,7 @@ services:
     # the 386 variant, whose 32-bit binaries fail in the container with
     # "exec /mailpit: exec format error".
     platform: linux/amd64
-    container_name: iiq-mailpit
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-Mailpit
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -273,7 +278,7 @@ services:
   # -------------------------------------------------------------------------
   openldap:
     image: bitnamilegacy/openldap:2.6.10-debian-12-r4
-    container_name: iiq-openldap
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-OpenLDAP
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -326,7 +331,7 @@ services:
       context: .
       dockerfile: docker/mockapi/Dockerfile
     image: iiq-mockapi:${IIQ_VERSION:-8.5}
-    container_name: iiq-mockapi
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-REST_Mock
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -367,7 +372,7 @@ services:
       context: .
       dockerfile: docker/scim/Dockerfile
     image: iiq-scim:${IIQ_VERSION:-8.5}
-    container_name: iiq-scim
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-SCIM_Server
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -402,7 +407,7 @@ services:
     # Pinned by digest: personal namespace with a mutable tag. Was 0.15.4.
     image: dnknth/ldap-ui@sha256:186d758f7698892c6ef2642af6ed0f134fa611ed371e4d804e4816b700888059
     platform: linux/amd64
-    container_name: iiq-ldap-ui
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-LDAP_UI
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]
@@ -441,7 +446,7 @@ services:
   dbgate:
     image: dbgate/dbgate:7.3.0
     platform: linux/amd64
-    container_name: iiq-dbgate
+    container_name: SailPoint_IdentityIQ_${IIQ_VERSION:-8.5}-DBGate
     # Cheap hardening, safe everywhere: no setuid escalation inside
     # the container.
     security_opt: ["no-new-privileges:true"]

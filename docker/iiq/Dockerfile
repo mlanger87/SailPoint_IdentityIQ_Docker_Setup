@@ -27,9 +27,12 @@ FROM tomcat:9.0-jdk21-temurin AS extract
 ARG IIQ_VERSION=8.5
 ARG IIQ_PATCH=""
 ARG PG_JDBC_VERSION=42.7.5
+ARG MSSQL_JDBC_VERSION=13.6.0.jre11
 
-ARG DB_HOST=postgres
-ARG DB_PORT=5432
+# Repository database: postgresql (default) or sqlserver. Set by the
+# compose overlay docker-compose.sqlserver.yml. Decides what
+# iiq.properties points to; both drivers are in the image regardless.
+ARG IIQ_DB_TYPE=postgresql
 ARG IIQ_DB_USER=identityiq
 ARG IIQ_DB_PASSWORD=identityiq
 ARG IIQ_PLUGIN_DB_USER=identityiqPlugin
@@ -82,7 +85,8 @@ RUN chmod +x /tmp/apply-patch.sh \
 # --- PostgreSQL JDBC driver ------------------------------------------------
 # The Guide is explicit: "The JDBC driver for PostgreSQL is not provided
 # with IdentityIQ." The WAR only ships mysql-connector-j, so the driver
-# is added here.
+# is added here. Needed with every repository type: the JDBC target
+# system (targetdb) is always PostgreSQL.
 # --checksum: HTTPS only proves we talked to repo1. A republished or
 # mirrored artifact would otherwise swap the driver - the code every DB
 # byte passes through - on the next build without any signal. SHA-256
@@ -94,9 +98,20 @@ ADD --checksum=sha256:69020b3bd20984543e817393f2e6c01a890ef2e37a77dd11d6d8508181
     https://repo1.maven.org/maven2/org/postgresql/postgresql/${PG_JDBC_VERSION}/postgresql-${PG_JDBC_VERSION}.jar \
     ${SPHOME}/WEB-INF/lib/postgresql-${PG_JDBC_VERSION}.jar
 
-# --- Switch iiq.properties to PostgreSQL -----------------------------------
+# --- SQL Server JDBC driver ------------------------------------------------
+# Not shipped either (Guide p.19). The jre11 build is the one for Java
+# 11+. Same --checksum discipline as above: SHA-256 computed from the
+# jar, its SHA-1 cross-checked against Maven Central's .sha1
+# (9c438510cb1e19d2db0a152e9f719a32f11e1177).
+# Bumping MSSQL_JDBC_VERSION requires updating this hash.
+ADD --checksum=sha256:4c566e4022c4dcf1489aeb639fe49a0f6ffae3d796fdc2f56b5b8882d4c3bf5a \
+    --chmod=644 \
+    https://repo1.maven.org/maven2/com/microsoft/sqlserver/mssql-jdbc/${MSSQL_JDBC_VERSION}/mssql-jdbc-${MSSQL_JDBC_VERSION}.jar \
+    ${SPHOME}/WEB-INF/lib/mssql-jdbc-${MSSQL_JDBC_VERSION}.jar
+
+# --- Point iiq.properties at the repository database -----------------------
 COPY docker/iiq/iiq.properties.patch.sh /tmp/patch-props.sh
-RUN DB_HOST="${DB_HOST}" DB_PORT="${DB_PORT}" \
+RUN IIQ_DB_TYPE="${IIQ_DB_TYPE}" \
     IIQ_DB_USER="${IIQ_DB_USER}" IIQ_DB_PASSWORD="${IIQ_DB_PASSWORD}" \
     IIQ_PLUGIN_DB_USER="${IIQ_PLUGIN_DB_USER}" IIQ_PLUGIN_DB_PASSWORD="${IIQ_PLUGIN_DB_PASSWORD}" \
     IIQ_AH_DB_USER="${IIQ_AH_DB_USER}" IIQ_AH_DB_PASSWORD="${IIQ_AH_DB_PASSWORD}" \
@@ -109,19 +124,16 @@ RUN DB_HOST="${DB_HOST}" DB_PORT="${DB_PORT}" \
 FROM tomcat:9.0-jdk21-temurin AS runtime
 
 LABEL org.opencontainers.image.title="SailPoint IdentityIQ 8.5" \
-      org.opencontainers.image.description="IdentityIQ 8.5 on Tomcat 9 / OpenJDK 21 with PostgreSQL" \
+      org.opencontainers.image.description="IdentityIQ 8.5 on Tomcat 9 / OpenJDK 21 with PostgreSQL or SQL Server" \
       org.opencontainers.image.vendor="internal"
 
 ENV SPHOME=/usr/local/tomcat/webapps/identityiq \
     CATALINA_HOME=/usr/local/tomcat
 
-# gettext-base provides envsubst, postgresql-client provides pg_isready
-# (for the DB wait in the init container).
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        gettext-base \
-        postgresql-client \
- && rm -rf /var/lib/apt/lists/*
+# No database client in this image: the entrypoint waits for the
+# database with a plain TCP check (bash /dev/tcp), which works for every
+# repository type. The real gate is the healthcheck of the database
+# service (depends_on: service_healthy).
 
 # --- Everything small BEFORE the big COPY ----------------------------------
 # Order matters for layer caching: the webapp layer is ~1 GB. If it came

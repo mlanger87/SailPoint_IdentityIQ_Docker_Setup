@@ -8,7 +8,8 @@ instance, the instance wins; update this file.
 ## What this is
 
 A local Docker development environment for **SailPoint IdentityIQ 8.5** on
-**Tomcat 9 / OpenJDK 21 / PostgreSQL 17**, with a complete miniature system landscape:
+**Tomcat 9 / OpenJDK 21 / PostgreSQL 17** (or **SQL Server 2022** through the overlay
+`docker-compose.sqlserver.yml`), with a complete miniature system landscape:
 an authoritative HR source and four provisioning targets (LDAP, JDBC, SCIM 2.0,
 generic REST), plus joiner/leaver lifecycle driven by dates in the HR feed. IIQ runs
 as two nodes on one database, a UI node and a batch node, the usual production shape.
@@ -27,8 +28,9 @@ The IIQ installation package is licensed and **not** in the repository. Drop it 
   order: the Installation Guide inside the ZIP, the runtime DTD (`dtd /tmp/sp.dtd` in
   the console), reflection against the running JVM, the shipped templates under
   `WEB-INF/config/connector/`.
-- **Changing `.env` DB credentials requires a rebuild** — they are baked into the DDL
-  and `iiq.properties`:
+- **Changing `.env` DB credentials or the repository database (`COMPOSE_FILE`)
+  requires a rebuild and fresh volumes** — they are baked into the DDL and
+  `iiq.properties`:
   ```
   docker compose build && docker compose down -v && docker compose up -d
   ```
@@ -94,7 +96,7 @@ p.6: `--add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED`.
 7. **Tables live in a schema named like the database, not in `public`.** IIQ gets away
    with it because `"$user"` resolves to the same name as the schema. Every other
    client (`psql` as `postgres`, DBGate, ad-hoc SQL) needs the prefix or the
-   `search_path` that `docker/postgres/02-search-path.sql` sets per role and database.
+   `search_path` that `docker/postgres/search-path.sql` sets per role and database.
    `verify.sh` uses explicit prefixes so it does not depend on that hook having run on
    the current volume.
 8. `include_dir` **cannot** be passed as `postgres -c include_dir=…` (`FATAL: unrecognized
@@ -102,6 +104,56 @@ p.6: `--add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED`.
    `00-apply-tuning.sh`. No `pg_ctl reload` there: `max_connections`/`shared_buffers`
    need a restart and the reload would log "configuration file contains errors" — the
    entrypoint restarts anyway.
+9. **The IIQ schema is created by `01-iiq-repository.sh`, not by `.sql` hooks.** A
+   `.sql` file in `initdb.d` runs unconditionally; the shell hook skips the DDL when
+   `IIQ_DB_TYPE` is not `postgresql` (the SQL Server overlay sets it), so Postgres then
+   holds only `targetdb`. Effective on an empty volume only, like every initdb hook.
+
+### SQL Server
+
+Source: `WEB-INF/database/create_identityiq_tables-8.5.sqlserver`, Guide p.19, the
+commented samples in the shipped `iiq.properties`, the running instance.
+
+1. **No JDBC driver shipped** (Guide p.19). `mssql-jdbc-13.6.0.jre11` from Maven
+   Central, `ADD --checksum` like the PG driver. Both drivers are always in the image;
+   the JDBC target needs the PG one with either repository.
+2. Dialect `sailpoint.persistence.SQLServerUnicodeDialect`, Quartz delegate
+   `org.quartz.impl.jdbcjobstore.MSSQLDelegate` (both from the shipped sample).
+3. **The DDL is a sqlcmd script** (`GO`, `USE`) and creates all three databases, three
+   logins with passwords, users, schemas named like the databases, `db_owner`, and
+   `ALLOW_SNAPSHOT_ISOLATION`/`READ_COMMITTED_SNAPSHOT` ON (Guide: mandatory, otherwise
+   deadlocks). 220 tables in `identityiq`, 32 in `identityiqah`, 0 in the plugin
+   database. Run with `sqlcmd -b -x`: `-b` because sqlcmd exits 0 on SQL errors by
+   default, `-x` so nothing in the DDL is taken for a `$(variable)`.
+4. **`CREATE LOGIN` enforces password complexity on Linux.** The stock dev passwords
+   would be rejected; the build appends `CHECK_POLICY=OFF`. `sa`
+   (`MSSQL_SA_PASSWORD`) is checked by the server itself at first start and has no
+   such escape: too simple and the container does not come up.
+5. **mssql-jdbc 10+ encrypts by default** and rejects the container's self-signed
+   certificate. The URL carries `encrypt=false` (bridge network only). sqlcmd 18 has
+   the same default; `-C` trusts the certificate.
+6. Case-insensitivity comes from the server collation (Guide: required). The image
+   default `SQL_Latin1_General_CP1_CI_AS` qualifies; the overlay sets it explicitly.
+7. **No init hook directory in the official image.** `docker/mssql/entrypoint.sh`
+   starts `sqlservr` in the background, runs the DDL once, and writes a marker into
+   the data volume only after success; the healthcheck requires the marker.
+   Databases without a marker mean an aborted first start → the entrypoint refuses
+   and names the volume to delete. Measured: DDL complete 30 s after container start.
+   The `Logon Error: 18456` lines in the log come from the readiness loop before the
+   server accepts `sa`; harmless.
+8. Dialect differences that matter for ad-hoc SQL (all in `verify.sh`):
+   `string_agg(x, ',') WITHIN GROUP (ORDER BY x)`, booleans are `bit` (`= 0`),
+   epoch millis via `DATEDIFF_BIG(millisecond, '1970-01-01', SYSUTCDATETIME())`.
+   Schema-qualified names and `information_schema` are portable as written.
+9. The image is amd64 only and pinned to a CU (`2022-CU27-ubuntu-22.04`); it runs as
+   uid 10001 (`mssql`). `MSSQL_MEMORY_LIMIT_MB` caps it — the default of 80 % of the
+   VM would starve the IIQ JVMs.
+
+**Oracle** was evaluated and left out: 19c is the only supported release, the only
+19c images need an Oracle account (`container-registry.oracle.com`) or a self-built
+image from the downloaded installer, and `gvenzl/oracle-free` is 23ai — not on the
+support list. The Oracle DDL also creates no users (commented out) and puts all three
+"databases" into schemas of one database.
 
 ### Sizes
 
@@ -231,6 +283,23 @@ silently — an option only in the base file was never active. Now the base appe
 `${IIQ_EXTRA_OPTS}` from `.env`; the override sets nothing else. Compose expands `${…}`
 only from `.env`, not from another service's `environment` block.
 
+**Repository database as an overlay file, not profiles.** SQL Server differs in five
+places at once: an extra service, IIQ build arg and image tag, `depends_on`, the
+Postgres hook switch, three DBGate connections. Profiles would need `COMPOSE_PROFILES`
+*and* a type variable that must agree, plus conditional DBGate settings Compose
+cannot express. One overlay file selected by `COMPOSE_FILE` keeps it to one switch,
+and adding Oracle later is one more file. Consequences:
+- `COMPOSE_FILE` disables the automatic override, so it lists the override
+  explicitly. `COMPOSE_PATH_SEPARATOR=:` because the Windows default is `;`.
+- The host scripts derive the type from `COMPOSE_FILE` (`env.sh`, `env.ps1`), never
+  from a variable of their own.
+- **The IIQ image tag carries the type** (`iiq-app:8.5-sqlserver`). With one tag,
+  `up` after a switch would start the existing image whose `iiq.properties` points
+  at the other database; a missing tag forces the build.
+- The entrypoint reads host and port back from `dataSource.url` in `iiq.properties`
+  and waits with a bash `/dev/tcp` check. `DB_HOST`/`DB_PORT` and `postgresql-client`
+  are gone from the image: one source, works for every type.
+
 ## System landscape
 
 | Object | Type | Role | Seed data |
@@ -282,6 +351,16 @@ like. Anything else is a regression.
 
 Reproduced unchanged on 2026-09-22 after the split into two nodes (fresh volumes,
 rebuilt images).
+
+Reproduced on 2026-10-01 on **both repository databases**, each from fresh volumes
+and rebuilt images: PostgreSQL and SQL Server 2022 give identical numbers in every
+row above, `verify.sh` green on both. One row differs from the table, on both
+databases alike: **`inactive` is 9**. That is the calendar, not a regression —
+`inactive` is computed from the dates at aggregation time, and person 1009's
+`startDate` (2026-09-27) has passed since the table was measured. The role counts
+do not move because the selectors read `hrStatus`, which the generator fixed when it
+wrote the CSV. Expect `inactive` to fall further as the other future joiners'
+start dates pass (next: 1084 on 2026-10-10); regenerate the test data to reset it.
 
 The three items that were open before this run — roles at 0, manager empty, the
 Daniel Morgan merge — are closed; their root causes are recorded under Pitfalls
@@ -356,6 +435,9 @@ part of the fresh run above.
   (`syntax error near unexpected token '('`). The manifest escaping uses `sed`.
   `bash -n` on every script before a rebuild — the init container is the only place
   that runs them and a parse error there blocks the whole stack.
+- **`set: Illegal option -o pipefail`** at build time means the script ran under
+  `dash`: its `#!/bin/bash` line is missing (lost once while rewriting a header
+  comment). `bash -n` does not catch that; `head -1` on every script does.
 
 ### The IIQ console
 
@@ -522,7 +604,7 @@ is not available in the Bitnami image. The group schema's `nativeObjectType` and
 `groupMemberAttribute` must match the directory (`groupOfNames`/`member` here); a
 production export used `groupOfUniqueNames`/`uniqueMember` and would aggregate nothing.
 LDIFs load **only into an empty volume**: `docker compose rm -sf openldap &&
-docker volume rm iiq85_ldapdata && docker compose up -d openldap`.
+docker volume rm sailpoint-identityiq85_ldapdata && docker compose up -d openldap`.
 **Aggregation derives `IIQDisabled` from `revokeAttr`/`revokeVal`**: an entry seeded
 with `pwdAccountLockedTime: 000001010000Z` (an operational attribute, but `ldapadd`
 as the admin accepts it) arrives as a disabled link; the three disabled LDAP seed

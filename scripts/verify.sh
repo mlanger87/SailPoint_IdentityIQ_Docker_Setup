@@ -6,10 +6,11 @@
 #
 # Checks in order:
 #   1. All containers are running and healthy
-#   2. The three IIQ databases exist and are populated
+#   2. The three IIQ databases exist and are populated (PostgreSQL or
+#      SQL Server, whichever is the repository - see env.sh)
 #   3. The base configuration was imported
 #   4. The web UI responds
-#   5. The Quartz scheduler runs (PostgreSQL delegate in effect)
+#   5. The Quartz scheduler runs (database-specific delegate in effect)
 #   6. Mailpit is reachable
 #   7. System landscape: source and target systems
 # ===========================================================================
@@ -34,12 +35,29 @@ info()  { printf '         %s\n' "$1"; }
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Runs a query and returns the result stripped of whitespace.
-# Folds a pattern that would otherwise be repeated eight times.
+# Runs a query against PostgreSQL and returns the result stripped of
+# whitespace. Used directly for targetdb, which is always PostgreSQL.
 pq() {
     docker compose exec -T postgres psql -U postgres -d "$1" -tAc "$2" \
         2>/dev/null | tr -d '[:space:]'
 }
+
+# Runs a query against the IdentityIQ repository, whichever database
+# holds it. $1 database, $2 the statement, $3 a SQL Server variant where
+# the dialects differ (string aggregation, booleans, epoch arithmetic).
+# The rest is portable as written: schema-qualified names and
+# information_schema mean the same on both.
+iq() {
+    if [ "${IIQ_DB_TYPE}" = "sqlserver" ]; then
+        docker compose exec -T mssql sqlq -d "$1" -Q "SET NOCOUNT ON; ${3:-$2}" \
+            2>/dev/null | tr -d '[:space:]'
+    else
+        pq "$1" "$2"
+    fi
+}
+
+# The server-level database of each engine, for catalog queries.
+if [ "${IIQ_DB_TYPE}" = "sqlserver" ]; then SERVER_DB=master; else SERVER_DB=postgres; fi
 
 # Returns digits only, otherwise 0.
 #
@@ -57,7 +75,10 @@ as_number() {
 # ---------------------------------------------------------------------------
 step "1. Containers"
 # ---------------------------------------------------------------------------
-for svc in postgres iiq mailpit openldap dbgate ldap-ui scim mockapi; do
+info "repository database: ${IIQ_DB_TYPE}"
+services="postgres iiq iiq-batch mailpit openldap dbgate ldap-ui scim mockapi"
+if [ "${IIQ_DB_TYPE}" = "sqlserver" ]; then services="mssql ${services}"; fi
+for svc in ${services}; do
     cid="$(docker compose ps -q "${svc}" 2>/dev/null)"
     if [ -z "${cid}" ]; then
         fail "${svc}: not running"
@@ -87,16 +108,16 @@ fi
 step "2. Database"
 # ---------------------------------------------------------------------------
 for db in identityiq identityiqah identityiqPlugin; do
-    if docker compose exec -T postgres psql -U postgres -tAc \
-           "SELECT 1 FROM pg_database WHERE datname='${db}';" 2>/dev/null | grep -q 1; then
+    if [ "$(iq "${SERVER_DB}" "SELECT 1 FROM pg_database WHERE datname='${db}';" \
+                              "SELECT 1 FROM sys.databases WHERE name='${db}';")" = "1" ]; then
         ok "database ${db} present"
     else
         fail "database ${db} missing"
     fi
 done
 
-tables="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema='identityiq';" 2>/dev/null | tr -d '[:space:]')"
+tables="$(as_number "$(iq identityiq \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema='identityiq';")")"
 if [ "${tables:-0}" -gt 200 ]; then
     ok "identityiq: ${tables} tables"
 else
@@ -106,16 +127,14 @@ fi
 # ---------------------------------------------------------------------------
 step "3. Base configuration"
 # ---------------------------------------------------------------------------
-identities="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-    "SELECT count(*) FROM identityiq.spt_identity;" 2>/dev/null | tr -d '[:space:]')"
+identities="$(as_number "$(iq identityiq "SELECT count(*) FROM identityiq.spt_identity;")")"
 if [ "${identities:-0}" -ge 1 ]; then
     ok "spt_identity: ${identities} rows (spadmin present)"
 else
     fail "spt_identity is empty - init.xml was not imported"
 fi
 
-objects="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-    "SELECT count(*) FROM identityiq.spt_configuration;" 2>/dev/null | tr -d '[:space:]')"
+objects="$(as_number "$(iq identityiq "SELECT count(*) FROM identityiq.spt_configuration;")")"
 if [ "${objects:-0}" -ge 1 ]; then
     ok "spt_configuration: ${objects} rows"
 else
@@ -123,8 +142,8 @@ else
 fi
 
 # Was the custom mail configuration applied?
-mailhost="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-    "SELECT count(*) FROM identityiq.spt_configuration WHERE name='SystemConfiguration';" 2>/dev/null | tr -d '[:space:]')"
+mailhost="$(as_number "$(iq identityiq \
+    "SELECT count(*) FROM identityiq.spt_configuration WHERE name='SystemConfiguration';")")"
 if [ "${mailhost:-0}" -ge 1 ]; then
     ok "SystemConfiguration present"
 else
@@ -166,15 +185,19 @@ else
 fi
 
 # Heartbeat within the last 2 minutes = the node is alive from IIQ's view.
-live_nodes="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc     "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_server
+live_nodes="$(iq identityiq \
+    "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_server
       WHERE inactive = false AND name NOT LIKE '%-console'
-        AND heartbeat > (extract(epoch from now()) * 1000)::bigint - 120000;" 2>/dev/null | tr -d '[:space:]')"
+        AND heartbeat > (extract(epoch from now()) * 1000)::bigint - 120000;" \
+    "SELECT string_agg(name, ',') WITHIN GROUP (ORDER BY name) FROM identityiq.spt_server
+      WHERE inactive = 0 AND name NOT LIKE '%-console'
+        AND heartbeat > DATEDIFF_BIG(millisecond, '1970-01-01', SYSUTCDATETIME()) - 120000;")"
 case ",${live_nodes}," in
     *,iiq-batch,*) ok "Server objects with a fresh heartbeat: ${live_nodes}" ;;
     *) fail "batch node has no fresh heartbeat (live: ${live_nodes:-none})" ;;
 esac
 
-task_hosts="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc     "SELECT hosts FROM identityiq.spt_service_definition WHERE name='Task';" 2>/dev/null | tr -d '[:space:]')"
+task_hosts="$(iq identityiq "SELECT hosts FROM identityiq.spt_service_definition WHERE name='Task';")"
 if [ "${task_hosts}" = "iiq-batch" ]; then
     ok "Task service pinned to hosts=${task_hosts}"
 else
@@ -182,12 +205,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "5. Quartz scheduler (PostgreSQL delegate)"
+step "5. Quartz scheduler (${IIQ_DB_TYPE} delegate)"
 # ---------------------------------------------------------------------------
 # With a wrong delegate these tables would stay empty, or the scheduler
 # would abort at startup with an exception.
-triggers="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-    "SELECT count(*) FROM identityiq.qrtz221_triggers;" 2>/dev/null | tr -d '[:space:]')"
+triggers="$(iq identityiq "SELECT count(*) FROM identityiq.qrtz221_triggers;")"
 if [ -n "${triggers}" ] && [ "${triggers}" -ge 0 ] 2>/dev/null; then
     ok "Quartz tables readable (${triggers} triggers)"
 else
@@ -218,8 +240,9 @@ step "7. System landscape: source and target systems"
 # aggregation has already delivered data depends on whether the tasks
 # have run - that is up to the user (Setup > Tasks).
 
-apps="$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-        "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_application;" 2>/dev/null | tr -d '[:space:]')"
+apps="$(iq identityiq \
+        "SELECT string_agg(name, ',' ORDER BY name) FROM identityiq.spt_application;" \
+        "SELECT string_agg(name, ',') WITHIN GROUP (ORDER BY name) FROM identityiq.spt_application;")"
 
 for expected in HR-Application LDAP-Target JDBC-Target SCIM-Target WebService-Target; do
     if echo "${apps}" | grep -q "${expected}"; then
@@ -242,19 +265,16 @@ else
     info "check the mount: docker compose config | grep -A3 'data/hr'"
 fi
 
-target_accounts="$(as_number "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc \
-                   'SELECT count(*) FROM targetapp."IIQData";' 2>/dev/null | tr -d '[:space:]')")"
+target_accounts="$(as_number "$(pq targetdb 'SELECT count(*) FROM targetapp."IIQData";')")"
 if [ -n "${target_accounts}" ]; then
-    target_roles="$(as_number "$(docker compose exec -T postgres psql -U postgres -d targetdb -tAc \
-                    'SELECT count(*) FROM targetapp."IIQRoles";' 2>/dev/null | tr -d '[:space:]')")"
+    target_roles="$(as_number "$(pq targetdb 'SELECT count(*) FROM targetapp."IIQRoles";')")"
     ok "target database targetdb reachable (${target_accounts} accounts, ${target_roles} roles)"
 else
     fail "target database targetdb not readable"
 fi
 
 # Without the rules IIQ cannot write to the JDBC target.
-rules="$(as_number "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-         "SELECT count(*) FROM identityiq.spt_rule WHERE name LIKE 'JDBC-Target%';" 2>/dev/null | tr -d '[:space:]')")"
+rules="$(as_number "$(iq identityiq "SELECT count(*) FROM identityiq.spt_rule WHERE name LIKE 'JDBC-Target%';")")"
 if [ "${rules:-0}" -ge 6 ]; then
     ok "JDBC provisioning rules present (${rules})"
 else
@@ -292,8 +312,7 @@ fi
 
 # Without extendedNumber no filter finds the attributes - role assignment
 # and manager correlation then silently run into nothing.
-extended="$(as_number "$(docker compose exec -T postgres psql -U postgres -d identityiq -tAc \
-            "SELECT count(*) FROM identityiq.spt_identity WHERE extended1 IS NOT NULL;" 2>/dev/null | tr -d '[:space:]')")"
+extended="$(as_number "$(iq identityiq "SELECT count(*) FROM identityiq.spt_identity WHERE extended1 IS NOT NULL;")")"
 if [ "${extended:-0}" -gt 0 ]; then
     ok "identity attributes populated (${extended} with employeeNumber)"
 else

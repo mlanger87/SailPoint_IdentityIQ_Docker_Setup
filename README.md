@@ -1,7 +1,7 @@
 # SailPoint IdentityIQ 8.5 — Docker dev environment
 
 A complete IdentityIQ development environment that starts with one command:
-IdentityIQ 8.5 on Tomcat 9 / OpenJDK 21 / PostgreSQL 17, split into a UI node and a
+IdentityIQ 8.5 on Tomcat 9 / OpenJDK 21 / PostgreSQL 17 (or SQL Server 2022), split into a UI node and a
 batch node, with an authoritative HR source, four provisioning targets (LDAP, JDBC,
 SCIM 2.0, generic REST) and a date-driven joiner/leaver lifecycle. Everything is
 pre-wired: aggregate, assign roles, watch accounts appear in the targets.
@@ -26,6 +26,7 @@ non-trivial.
 - [Endpoints](#endpoints)
 - [Daily use](#daily-use)
 - [Two nodes: UI and batch](#two-nodes-ui-and-batch)
+- [Repository database: PostgreSQL or SQL Server](#repository-database-postgresql-or-sql-server)
 - [System landscape](#system-landscape)
 - [Layout](#layout)
 - [Troubleshooting](#troubleshooting)
@@ -38,7 +39,7 @@ non-trivial.
 | | |
 |---|---|
 | **IdentityIQ 8.5** | Tomcat 9, OpenJDK 21, two nodes against one database |
-| **PostgreSQL 17** | IIQ schema created from SailPoint's own DDL at image build |
+| **PostgreSQL 17** or **SQL Server 2022** | IIQ schema created from SailPoint's own DDL; PostgreSQL by default, SQL Server [by one setting](#repository-database-postgresql-or-sql-server) |
 | **HR source** | 100 generated people in a CSV, authoritative, correlated by personnel number |
 | **Four targets** | OpenLDAP, a JDBC database, a SCIM 2.0 server, a generic REST API |
 | **Roles** | seven business and IT roles that provision accounts on every target |
@@ -233,6 +234,7 @@ file, so they follow automatically.
 | SCIM server | http://localhost:8100 | Bearer `secret` |
 | Mock REST API | http://localhost:8200 | Bearer `mocktoken` or Basic `iiq`/`iiqpassword` |
 | PostgreSQL | `localhost:5432` | `identityiq` / `identityiq` |
+| SQL Server (overlay only) | `localhost:1433` | `identityiq` / `identityiq`, or `sa` / `MSSQL_SA_PASSWORD` |
 | OpenLDAP | `localhost:1389` | `cn=admin,dc=example,dc=com` / `adminpassword` |
 | JDWP | `localhost:8000` | attach from your IDE; Tomcat does not wait for it |
 
@@ -241,8 +243,12 @@ file, so they follow automatically.
 ## Daily use
 
 ```powershell
-.\scripts\iiq.ps1 status | console | import | logs | psql | shell | restart | reset
+.\scripts\iiq.ps1 status | console | import | logs | sql | psql | shell | restart | reset
 ```
+
+`sql` opens a shell on the IIQ repository (psql or sqlcmd, whichever is active);
+`psql` always goes to PostgreSQL. With SQL Server as the repository, that means
+`targetdb`.
 
 - **Custom objects:** XML into `data/objects/`, then `.\scripts\iiq.ps1 import`. Files
   import alphabetically in one console session (one JVM start instead of one per
@@ -254,9 +260,10 @@ file, so they follow automatically.
   material in that directory is gitignored.
 - **Removing an object:** deleting its file does not delete it from IIQ — import only
   adds and merges. Use `delete <Class> "<name>"` in the console.
-- **Ad-hoc SQL:** DBGate, or `.\scripts\iiq.ps1 psql`. Tables live in a schema named
-  `identityiq`, not in `public`; the `search_path` is preset per role, but explicit
-  prefixes are safer.
+- **Ad-hoc SQL:** DBGate, or `.\scripts\iiq.ps1 sql`. Tables live in a schema named
+  `identityiq` on both databases, not in `public` / `dbo`. On PostgreSQL the
+  `search_path` is preset per role, but explicit prefixes (`identityiq.spt_identity`)
+  work everywhere.
 
 ---
 
@@ -286,6 +293,54 @@ Tasks started from the UI on port 8080 or from the console run on the batch node
 task result records the executing host. There is no load balancer: two ports, no
 sticky sessions. Debugging (JDWP) and the log bind mount `data/logs/` belong to the UI
 node; the batch node logs to `data/logs/batch/`.
+
+---
+
+## Repository database: PostgreSQL or SQL Server
+
+PostgreSQL 17 is the default. SQL Server 2022 (Developer edition) is the alternative;
+both are on SailPoint's support list for 8.5. Everything that differs lives in one
+overlay file, `docker-compose.sqlserver.yml`, activated through `.env`:
+
+```dotenv
+COMPOSE_PATH_SEPARATOR=:
+COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.sqlserver.yml
+```
+
+Then start from empty volumes; a repository switch is a new installation:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+What changes with the overlay:
+
+- A `mssql` container (`mcr.microsoft.com/mssql/server:2022-CU27`, own image in
+  `docker/mssql/`) creates the three IIQ databases from SailPoint's
+  `create_identityiq_tables-8.5.sqlserver` on first start. It reports healthy only
+  once that DDL has completed, so `iiq-init` never sees a half-built schema.
+- The IIQ image is built with `IIQ_DB_TYPE=sqlserver` and tagged
+  `iiq-app:8.5-sqlserver`: `iiq.properties` gets the SQL Server URL, driver,
+  `SQLServerUnicodeDialect` and the `MSSQLDelegate` for Quartz. Both JDBC drivers
+  are always in the image.
+- PostgreSQL keeps running, but only as the JDBC target system (`targetdb`). It no
+  longer creates the IIQ databases.
+- DBGate's three IIQ connections point at SQL Server. `verify.sh`,
+  `iiq.ps1 sql` and the endpoint table follow `COMPOSE_FILE` automatically.
+
+Notes:
+
+- **License:** the overlay sets `ACCEPT_EULA=Y`. Activating it means you accept
+  Microsoft's license terms for SQL Server Developer edition, which covers
+  development and test use only.
+- **`MSSQL_SA_PASSWORD`** must meet SQL Server's complexity rules, or the server does
+  not start. The IIQ logins keep the simple `.env` passwords (`CHECK_POLICY=OFF`).
+- **`MSSQL_MEMORY_LIMIT_MB`** (default 2048) caps SQL Server. Without a cap it takes
+  80 % of the Docker VM's memory and starves the IIQ nodes.
+- **amd64 only:** Microsoft publishes no arm64 image.
+- **Oracle** is not offered. 19c is the only supported release, and there is no
+  freely pullable 19c image (it needs an Oracle account and a license acceptance).
 
 ---
 
@@ -370,7 +425,7 @@ The CSV and the SCIM seed are live (bind mounts; the SCIM server re-reads its se
 volume:
 
 ```powershell
-docker compose rm -sf openldap; docker volume rm iiq85_ldapdata; docker compose up -d openldap
+docker compose rm -sf openldap; docker volume rm sailpoint-identityiq85_ldapdata; docker compose up -d openldap
 ```
 
 After such a reset run `LDAP Account Aggregation` (drops the links of the vanished
@@ -383,10 +438,12 @@ entries) and `Refresh Identity Cube` (recreates them from the roles).
 ```
 docker-compose.yml            services, health checks, loopback ports
 docker-compose.override.yml   dev extras: JDWP, log bind-mounts (auto-loaded)
+docker-compose.sqlserver.yml  overlay: SQL Server as repository (via COMPOSE_FILE)
 .env                          ports, credentials, heap, IIQ_EXTRA_OPTS (gitignored)
 installer/                    the SailPoint ZIP goes here (gitignored)
 docker/iiq/                   Tomcat 9 + JDK 21 image, entrypoint, patch scripts
 docker/postgres/              PG 17 image with IIQ DDL and targetdb as initdb hooks
+docker/mssql/                 SQL Server 2022 image with IIQ DDL (overlay only)
 docker/mockapi/               REST mock (stdlib Python, ~50 MB image)
 docker/scim/                  SCIM 2.0 server (stdlib Python, same construction)
 docker/openldap/ldif/         01-structure (hand-written), 02/03 (generated)
@@ -399,8 +456,13 @@ scripts/                      setup, verify, iiq wrapper, test-data generator
 ```
 
 Containers: `postgres`, `iiq-init` (runs once, exits), `iiq`, `iiq-batch`, `mailpit`,
-`openldap`, `ldap-ui`, `dbgate`, `scim`, `mockapi`. Seven have health checks; both IIQ
-nodes wait for `postgres` healthy and `iiq-init` completed.
+`openldap`, `ldap-ui`, `dbgate`, `scim`, `mockapi`, plus `mssql` with the overlay.
+Seven have health checks (eight with `mssql`); both IIQ nodes wait for the database
+healthy and `iiq-init` completed. Those are the service names, which every `docker
+compose` command and script uses. The container names in `docker ps` and Docker
+Desktop say what each container is: `SailPoint_IdentityIQ_8.5-UI`, `-Batch`,
+`-PostgreSQL_DB` (`-PostgreSQL_TargetDB` and `-SQLServer_DB` with the overlay), and
+so on.
 
 Generated files are committed but never hand-edited — change the generator instead:
 `data/hr/HR-people.csv`, `docker/openldap/ldif/02-users.ldif`, `03-groups.ldif`,
@@ -424,6 +486,8 @@ Generated files are committed but never hand-edited — change the generator ins
 | `exec format error` on a third-party image | The containerd image store picks the first manifest platform. Set `platform: linux/amd64`, or use another image. |
 | `bad interpreter` in a container | CRLF line endings. `git ls-files --eol scripts/` must show `i/lf w/lf`. |
 | Changed DB passwords in `.env` | They are baked into the image: `docker compose build && docker compose down -v && docker compose up -d`. |
+| `iiq-init`: "database not reachable", host `mssql` or `postgres` unknown | The IIQ image was built for the other repository type. Check `COMPOSE_FILE` in `.env`, then `docker compose up -d --build`. |
+| `mssql` unhealthy, log says "database identityiq exists, but the schema was never completed" | An earlier first start aborted mid-DDL. `docker compose rm -sf mssql && docker volume rm sailpoint-identityiq85_mssqldata`, then `up -d`. |
 | Out of memory, containers killed | Two IIQ nodes take 3 GB each by default. Lower `IIQ_HEAP` / `IIQ_BATCH_HEAP`, or give Docker more RAM. |
 | Full reset | `.\scripts\iiq.ps1 reset`, then `docker compose up -d`. |
 
@@ -440,7 +504,7 @@ This is a laptop development environment, and the choices reflect that:
 - Mitigations that are in place regardless: every published port is loopback-only,
   the IIQ and mock images run as UID 1000 with `cap_drop: [ALL]`, every service has
   `no-new-privileges`, all images are pinned by tag or digest, the JDBC driver
-  download is checksum-verified, no secret is printed to a container log, and `.env`,
+  downloads are checksum-verified, no secret is printed to a container log, and `.env`,
   the installer and key material under `data/` are gitignored.
 - Known and accepted: JDWP is reachable from sibling containers on the compose
   network; DBGate and Mailpit have no login (both loopback-only).
@@ -462,5 +526,6 @@ distributes nor circumvents any license: you need your own legally obtained copy
 the installation package.
 
 Third-party images used: `postgres`, `tomcat`, `bitnami/openldap`, `axllent/mailpit`,
-`dnknth/ldap-ui`, `dbgate/dbgate`. Each is pinned by tag or digest in
-`docker-compose.yml`.
+`dnknth/ldap-ui`, `dbgate/dbgate`, and with the SQL Server overlay
+`mcr.microsoft.com/mssql/server`. Each is pinned by tag or digest in the compose files
+and Dockerfiles.

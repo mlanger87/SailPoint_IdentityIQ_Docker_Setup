@@ -18,6 +18,7 @@ $script:EnvDefaults = @{
     IIQ_BATCH_HTTP_PORT = '8081'
     IIQ_DEBUG_PORT      = '8000'
     POSTGRES_PORT       = '5432'
+    MSSQL_PORT          = '1433'
     MAILPIT_UI_PORT     = '8025'
     DBGATE_PORT         = '5050'
     LDAP_PORT           = '1389'
@@ -51,10 +52,24 @@ function Get-DotEnv {
     return $values
 }
 
+function Get-DbType {
+    <#
+        Repository database, derived from the compose files in use: the
+        SQL Server overlay in COMPOSE_FILE means 'sqlserver', anything else
+        the PostgreSQL default. Derived, not a setting of its own - a second
+        variable could disagree with what compose actually starts.
+    #>
+    $e = Get-DotEnv
+    $composeFile = $e.COMPOSE_FILE
+    if ($env:COMPOSE_FILE) { $composeFile = $env:COMPOSE_FILE }
+    if ($composeFile -and $composeFile.Contains('docker-compose.sqlserver.yml')) { return 'sqlserver' }
+    return 'postgresql'
+}
+
 function Get-PublishedPorts {
     <# Host ports that must be free before the stack starts; name -> port. #>
     $e = Get-DotEnv
-    return [ordered]@{
+    $ports = [ordered]@{
         'IdentityIQ'    = [int]$e.IIQ_HTTP_PORT
         'IIQ batch'     = [int]$e.IIQ_BATCH_HTTP_PORT
         'JDWP'          = [int]$e.IIQ_DEBUG_PORT
@@ -66,6 +81,8 @@ function Get-PublishedPorts {
         'SCIM'          = [int]$e.SCIM_PORT
         'Mock REST API' = [int]$e.MOCKAPI_PORT
     }
+    if ((Get-DbType) -eq 'sqlserver') { $ports['SQL Server'] = [int]$e.MSSQL_PORT }
+    return $ports
 }
 
 function Write-Endpoints {
@@ -80,6 +97,9 @@ function Write-Endpoints {
     Write-Host "${Indent}SCIM server    http://localhost:$($e.SCIM_PORT)   (Bearer $($e.SCIM_API_KEY))"
     Write-Host "${Indent}Mock REST API  http://localhost:$($e.MOCKAPI_PORT)   (Bearer $($e.MOCKAPI_TOKEN) | Basic $($e.MOCKAPI_USER)/$($e.MOCKAPI_PASSWORD))"
     Write-Host "${Indent}PostgreSQL     localhost:$($e.POSTGRES_PORT)   OpenLDAP localhost:$($e.LDAP_PORT)   JDWP localhost:$($e.IIQ_DEBUG_PORT)"
+    if ((Get-DbType) -eq 'sqlserver') {
+        Write-Host "${Indent}SQL Server     localhost:$($e.MSSQL_PORT)   (IIQ repository; sa / MSSQL_SA_PASSWORD)"
+    }
 }
 
 function Invoke-Compose {

@@ -1,0 +1,17 @@
+#!/bin/sh
+# ===========================================================================
+# sqlcmd as sa against the local server, output fit for scripts.
+#
+#   sqlq -d identityiq -Q "SELECT count(*) FROM identityiq.spt_identity"
+#   sqlq -i script.sql
+#
+# -C   trust the server's self-signed certificate (sqlcmd 18 encrypts by
+#      default and would reject it)
+# -b   non-zero exit code on an SQL error (default is 0)
+# -h -1 / -W   no column headers, trimmed values
+#
+# The password goes through SQLCMDPASSWORD, not -P, so it does not show
+# up in the process list.
+# ===========================================================================
+SQLCMDPASSWORD="${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD not set}" \
+    exec /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -b -h -1 -W "$@"

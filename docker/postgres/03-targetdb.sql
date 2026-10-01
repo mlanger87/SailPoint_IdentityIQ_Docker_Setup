@@ -99,6 +99,6 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA targetapp TO targetapp;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA targetapp TO targetapp;
 
 -- Persist the search path so queries work without a schema prefix -
--- same reasoning as in 02-search-path.sql.
+-- same reasoning as in search-path.sql.
 ALTER ROLE targetapp IN DATABASE targetdb SET search_path TO targetapp, public;
 ALTER ROLE postgres  IN DATABASE targetdb SET search_path TO targetapp, public;

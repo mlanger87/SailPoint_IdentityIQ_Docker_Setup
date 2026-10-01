@@ -16,7 +16,8 @@
 -- Needlessly inconvenient. So the search path is set persistently here
 -- per role and database.
 --
--- Runs as an initdb hook AFTER the schema DDL (prefix 02).
+-- Run by 01-iiq-repository.sh right after the schema DDL, and only when
+-- PostgreSQL is the repository.
 -- ===========================================================================
 
 -- Main database

@@ -24,8 +24,6 @@ set -euo pipefail
 SPHOME="${SPHOME:-/usr/local/tomcat/webapps/identityiq}"
 IIQ_BIN="${SPHOME}/WEB-INF/bin/iiq"
 
-DB_HOST="${DB_HOST:-postgres}"
-DB_PORT="${DB_PORT:-5432}"
 DB_WAIT_TIMEOUT="${DB_WAIT_TIMEOUT:-180}"
 
 log() { echo "[iiq-entrypoint] $*"; }
@@ -33,12 +31,28 @@ log() { echo "[iiq-entrypoint] $*"; }
 # ---------------------------------------------------------------------------
 # Wait for the database
 # ---------------------------------------------------------------------------
+# Host and port come from dataSource.url in iiq.properties - written at
+# build time for the selected repository type - so there is no second
+# copy to drift. Handles jdbc:postgresql://host:port/db and
+# jdbc:sqlserver://host:port;databaseName=db.
+#
+# A TCP check, not a client tool: it covers every database type with
+# bash alone. It is a safety net; the gate that the schema is complete is
+# the database service's healthcheck behind depends_on.
 wait_for_db() {
-    log "Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT} (max ${DB_WAIT_TIMEOUT}s)"
+    local url
+    url="$(grep -E '^dataSource\.url=' "${SPHOME}/WEB-INF/classes/iiq.properties" | tail -1)"
+    url="${url#*://}"
+    url="${url%%[/;]*}"
+    local host="${url%:*}" port="${url##*:}"
+
+    log "Waiting for the database at ${host}:${port} (max ${DB_WAIT_TIMEOUT}s)"
     local waited=0
-    until pg_isready -h "${DB_HOST}" -p "${DB_PORT}" -q; do
+    until (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null; do
         if [ "${waited}" -ge "${DB_WAIT_TIMEOUT}" ]; then
             log "ERROR: database not reachable after ${DB_WAIT_TIMEOUT}s."
+            log "If ${host} is unknown: the image was built for another repository"
+            log "type than the running stack (docker-compose.sqlserver.yml in COMPOSE_FILE?)."
             return 1
         fi
         sleep 2

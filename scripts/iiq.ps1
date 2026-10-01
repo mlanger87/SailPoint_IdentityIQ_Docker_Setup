@@ -7,13 +7,14 @@
     .\scripts\iiq.ps1 import        # re-import data\objects
     .\scripts\iiq.ps1 logs          # follow IdentityIQ logs
     .\scripts\iiq.ps1 status        # state of all containers
-    .\scripts\iiq.ps1 psql          # psql on the IIQ database
+    .\scripts\iiq.ps1 sql           # SQL shell on the IIQ repository (psql or sqlcmd)
+    .\scripts\iiq.ps1 psql          # psql on PostgreSQL (repository or targetdb)
     .\scripts\iiq.ps1 reset         # reset EVERYTHING (with confirmation)
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('console', 'import', 'logs', 'status', 'psql', 'reset', 'restart', 'shell')]
+    [ValidateSet('console', 'import', 'logs', 'status', 'sql', 'psql', 'reset', 'restart', 'shell')]
     [string]$Command = 'status'
 )
 
@@ -52,8 +53,24 @@ try {
             Write-Endpoints
         }
 
+        'sql' {
+            if ((Get-DbType) -eq 'sqlserver') {
+                # sqlcmd as sa, with headers (sqlq strips them for scripts).
+                # The password stays inside the container. GO runs a batch.
+                docker compose exec mssql sh -c 'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -d identityiq'
+            } else {
+                docker compose exec postgres psql -U identityiq -d identityiq
+            }
+        }
+
         'psql' {
-            docker compose exec postgres psql -U identityiq -d identityiq
+            # With SQL Server as repository the IIQ databases do not exist in
+            # PostgreSQL; connect to the JDBC target instead.
+            if ((Get-DbType) -eq 'sqlserver') {
+                docker compose exec postgres psql -U postgres -d targetdb
+            } else {
+                docker compose exec postgres psql -U identityiq -d identityiq
+            }
         }
 
         'shell' {

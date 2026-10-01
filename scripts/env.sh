@@ -35,6 +35,7 @@ unset _line _key _val
 : "${IIQ_BATCH_HTTP_PORT:=8081}"
 : "${IIQ_DEBUG_PORT:=8000}"
 : "${POSTGRES_PORT:=5432}"
+: "${MSSQL_PORT:=1433}"
 : "${MAILPIT_UI_PORT:=8025}"
 : "${DBGATE_PORT:=5050}"
 : "${LDAP_PORT:=1389}"
@@ -48,15 +49,28 @@ unset _line _key _val
 : "${MOCKAPI_TOKEN:=mocktoken}"
 : "${MOCKAPI_USER:=iiq}"
 : "${MOCKAPI_PASSWORD:=iiqpassword}"
-export IIQ_HTTP_PORT IIQ_BATCH_HTTP_PORT IIQ_DEBUG_PORT POSTGRES_PORT MAILPIT_UI_PORT DBGATE_PORT \
+export IIQ_HTTP_PORT IIQ_BATCH_HTTP_PORT IIQ_DEBUG_PORT POSTGRES_PORT MSSQL_PORT MAILPIT_UI_PORT DBGATE_PORT \
        LDAP_PORT LDAP_UI_PORT SCIM_PORT MOCKAPI_PORT LDAP_ROOT LDAP_ADMIN_USER \
        LDAP_ADMIN_PASSWORD SCIM_API_KEY MOCKAPI_TOKEN MOCKAPI_USER MOCKAPI_PASSWORD
+
+# Repository database, derived from the compose files in use: the SQL
+# Server overlay in COMPOSE_FILE means sqlserver, anything else the
+# PostgreSQL default. Derived, not a setting of its own - a second
+# variable could disagree with what compose actually starts.
+case "${COMPOSE_FILE:-}" in
+    *docker-compose.sqlserver.yml*) IIQ_DB_TYPE=sqlserver ;;
+    *)                              IIQ_DB_TYPE=postgresql ;;
+esac
+export IIQ_DB_TYPE
 
 # Ports that must be free on the host before the stack starts.
 env_published_ports() {
     printf '%s\n' "${IIQ_HTTP_PORT}" "${IIQ_BATCH_HTTP_PORT}" "${IIQ_DEBUG_PORT}" "${POSTGRES_PORT}" \
         "${MAILPIT_UI_PORT}" "${DBGATE_PORT}" "${LDAP_PORT}" "${LDAP_UI_PORT}" \
         "${SCIM_PORT}" "${MOCKAPI_PORT}"
+    if [ "${IIQ_DB_TYPE}" = "sqlserver" ]; then
+        printf '%s\n' "${MSSQL_PORT}"
+    fi
 }
 
 # The endpoint table shown by setup and status. Indented by $1.
@@ -70,4 +84,7 @@ env_print_endpoints() {
     printf '%sSCIM server    http://localhost:%s   (Bearer %s)\n' "$i" "${SCIM_PORT}" "${SCIM_API_KEY}"
     printf '%sMock REST API  http://localhost:%s   (Bearer %s | Basic %s/%s)\n' "$i" "${MOCKAPI_PORT}" "${MOCKAPI_TOKEN}" "${MOCKAPI_USER}" "${MOCKAPI_PASSWORD}"
     printf '%sPostgreSQL     localhost:%s   OpenLDAP localhost:%s   JDWP localhost:%s\n' "$i" "${POSTGRES_PORT}" "${LDAP_PORT}" "${IIQ_DEBUG_PORT}"
+    if [ "${IIQ_DB_TYPE}" = "sqlserver" ]; then
+        printf '%sSQL Server     localhost:%s   (IIQ repository; sa / MSSQL_SA_PASSWORD)\n' "$i" "${MSSQL_PORT}"
+    fi
 }

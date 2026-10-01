@@ -54,7 +54,7 @@ RUN unzip -j -o /work/package.zip \
         "database/create_identityiq_tables-${IIQ_VERSION}.postgresql" \
         -d /work/extracted \
  && mv /work/extracted/create_identityiq_tables-${IIQ_VERSION}.postgresql \
-       /work/extracted/01-create-identityiq.sql
+       /work/extracted/create-identityiq.sql
 
 # SailPoint's DDL hard-codes the default passwords
 # (CREATE USER identityiq WITH ENCRYPTED PASSWORD 'identityiq').
@@ -68,24 +68,24 @@ RUN cd /work/extracted \
       -e "s|^CREATE USER identityiq WITH ENCRYPTED PASSWORD 'identityiq';|CREATE USER ${IIQ_DB_USER} WITH ENCRYPTED PASSWORD '${IIQ_DB_PASSWORD}';|" \
       -e "s|^CREATE USER \"identityiqPlugin\" WITH ENCRYPTED PASSWORD 'identityiqPlugin';|CREATE USER \"${IIQ_PLUGIN_DB_USER}\" WITH ENCRYPTED PASSWORD '${IIQ_PLUGIN_DB_PASSWORD}';|" \
       -e "s|^CREATE USER identityiqah WITH ENCRYPTED PASSWORD 'identityiqah';|CREATE USER ${IIQ_AH_DB_USER} WITH ENCRYPTED PASSWORD '${IIQ_AH_DB_PASSWORD}';|" \
-      01-create-identityiq.sql \
+      create-identityiq.sql \
  && echo "--- Check: resulting CREATE USER lines ---" \
- && grep -n "^CREATE USER" 01-create-identityiq.sql
+ && grep -n "^CREATE USER" create-identityiq.sql
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime image
 # ---------------------------------------------------------------------------
 FROM postgres:17-bookworm
 
-# Executed automatically by psql on first start (alphabetical order).
-COPY --from=ddl /work/extracted/01-create-identityiq.sql \
-                /docker-entrypoint-initdb.d/01-create-identityiq.sql
-
-# Sets search_path to the IIQ schemas so tables are found without a
-# schema prefix (DBGate, psql, ad-hoc queries).
-# Must run AFTER the schema DDL - hence prefix 02.
-COPY docker/postgres/02-search-path.sql \
-     /docker-entrypoint-initdb.d/02-search-path.sql
+# IdentityIQ repository: the DDL and the search_path settings (tables are
+# found without a schema prefix in DBGate, psql, ad-hoc queries). Not
+# hooks themselves - 01-iiq-repository.sh runs both in that order, and
+# skips them when SQL Server is the repository (IIQ_DB_TYPE, set by
+# docker-compose.sqlserver.yml).
+COPY --from=ddl /work/extracted/create-identityiq.sql /opt/iiq/sql/create-identityiq.sql
+COPY docker/postgres/search-path.sql /opt/iiq/sql/search-path.sql
+COPY --chmod=755 docker/postgres/01-iiq-repository.sh \
+     /docker-entrypoint-initdb.d/01-iiq-repository.sh
 
 # Fourth database as target system for the JDBC connector. Deliberately
 # in the same container: the PostgreSQL JDBC driver is already in the
