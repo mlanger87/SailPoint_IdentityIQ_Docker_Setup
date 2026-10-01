@@ -283,6 +283,16 @@ silently — an option only in the base file was never active. Now the base appe
 `${IIQ_EXTRA_OPTS}` from `.env`; the override sets nothing else. Compose expands `${…}`
 only from `.env`, not from another service's `environment` block.
 
+**Names: project `sailpoint-identityiq85`, containers `SailPoint_IdentityIQ_8.5-<role>`.**
+Readable at a glance in `docker ps` and Docker Desktop; the database containers carry
+the type (`-PostgreSQL_DB`, `-SQLServer_DB`, and `-PostgreSQL_TargetDB` when
+Postgres is only the target, overridden in the SQL Server overlay). Container names
+are cosmetic — every script goes through compose service names, which did not
+change. The project name is not: Compose allows only lowercase, digits, `-` and `_`
+there (no spaces, no capitals), and it prefixes every volume. Renaming it from
+`iiq85` left the old `iiq85_*` volumes orphaned and started from empty ones; that
+is the cost of any later rename too.
+
 **Repository database as an overlay file, not profiles.** SQL Server differs in five
 places at once: an extra service, IIQ build arg and image tag, `depends_on`, the
 Postgres hook switch, three DBGate connections. Profiles would need `COMPOSE_PROFILES`

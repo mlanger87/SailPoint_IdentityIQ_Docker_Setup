@@ -123,6 +123,11 @@ from `.env.example`. It changes nothing else. Review `.env` if you want differen
 ports, a different heap or different passwords — the database passwords are baked
 into the image at build time, so change them now rather than later.
 
+This is also the moment to pick the repository database. PostgreSQL is the default
+and needs nothing. For SQL Server, uncomment the two `COMPOSE_` lines in `.env`
+before the first build; see
+[Repository database](#repository-database-postgresql-or-sql-server).
+
 ### 3. Build and start
 
 ```bash
@@ -130,8 +135,15 @@ docker compose up -d
 ```
 
 The first build takes **15 to 25 minutes**: the 742 MB WAR is unpacked into roughly
-8,984 files, the PostgreSQL image is prepared with SailPoint's 9,146-line DDL, and
-the three small Python images are built. Subsequent starts take about a minute.
+8,984 files, the database image is prepared with SailPoint's DDL (and SQL Server's
+2.3 GB base image is pulled, if selected), and the three small Python images are
+built. Subsequent starts take about a minute.
+
+In Docker Desktop the stack shows up as the project `sailpoint-identityiq85`, and each
+container's name says what it is: `SailPoint_IdentityIQ_8.5-UI`, `-Batch`, `-Init`,
+`-PostgreSQL_DB` (or `-SQLServer_DB` plus `-PostgreSQL_TargetDB`), `-OpenLDAP` and
+so on. Commands and scripts use the short service names (`iiq`, `iiq-batch`,
+`postgres`, `mssql`, …).
 
 After the images are built, `iiq-init` runs once: it creates the schema, imports the
 base configuration, applies a patch if you configured one, then imports every XML in
